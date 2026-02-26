@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>分组图片查看 - 学历证件稽核</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #1a1b26;
+      color: #c0caf5;
+      min-height: 100vh;
+    }
+    .header {
+      position: sticky;
+      top: 0;
+      background: #16161e;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      height: 52px;
+      z-index: 100;
+      border-bottom: 1px solid #363b54;
+    }
+    .header h1 { font-size: 1rem; font-weight: 600; margin: 0; }
+    .header-right { display: flex; align-items: center; gap: 12px; }
+    .header select {
+      background: #24283b;
+      color: #c0caf5;
+      border: 1px solid #414868;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.875rem;
+    }
+    .summary {
+      font-size: 0.8rem;
+      color: #565f89;
+    }
+    .loading, .error {
+      padding: 48px 24px;
+      text-align: center;
+    }
+    .error { color: #f7768e; }
+    .groups-list {
+      padding: 12px 16px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .group-card {
+      background: #24283b;
+      border-radius: 10px;
+      border: 1px solid #363b54;
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+    .group-card.abnormal { border-color: #7aa2f760; }
+    .group-card.abnormal.open { border-color: #bb9af7; }
+    .group-header {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      cursor: pointer;
+      user-select: none;
+      gap: 10px;
+      transition: background 0.15s;
+    }
+    .group-header:hover { background: #2a2f45; }
+    .group-title {
+      font-size: 0.92rem;
+      font-weight: 600;
+      flex: 1;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge-count { background: #363b54; color: #a9b1d6; }
+    .badge-abnormal { background: #bb9af7; color: #1a1b26; }
+    .badge-noise { background: #363b54; color: #565f89; }
+    .toggle-icon {
+      color: #414868;
+      font-size: 0.7rem;
+      transition: transform 0.2s;
+      flex-shrink: 0;
+    }
+    .group-card.open .toggle-icon { transform: rotate(90deg); }
+    .group-images {
+      display: none;
+      overflow-x: auto;
+      padding: 0 12px 14px;
+      gap: 12px;
+      -webkit-overflow-scrolling: touch;
+    }
+    .group-images::-webkit-scrollbar { height: 5px; }
+    .group-images::-webkit-scrollbar-track { background: #1e2030; border-radius: 3px; }
+    .group-images::-webkit-scrollbar-thumb { background: #414868; border-radius: 3px; }
+    .group-card.open .group-images { display: flex; }
+    .img-card {
+      flex: 0 0 auto;
+      width: 260px;
+      background: #1a1b26;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid #2f3249;
+    }
+    .img-wrap {
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: #16161e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .img-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+    .img-name {
+      padding: 6px 10px;
+      font-size: 0.78rem;
+      color: #565f89;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  </style>
+</head>
+<body>
+  <header class="header">
+    <h1>分组图片查看</h1>
+    <div class="header-right">
+      <span class="summary" id="summary"></span>
+      <select id="vectorField">
+        <option value="template_vector">模板向量</option>
+        <option value="image_vector">图像向量</option>
+        <option value="face_vector">人脸向量</option>
+      </select>
+    </div>
+  </header>
+
+  <div id="root">
+    <div class="loading" id="loading">正在加载聚类结果…</div>
+    <div class="error" id="error" style="display:none;"></div>
+    <div class="groups-list" id="groupsList" style="display:none;"></div>
+  </div>
+
+  <script>
+    const API_BASE = '';
+
+    function getImageUrl(id) {
+      return API_BASE + '/api/image/' + id;
+    }
+
+    async function loadCluster() {
+      const field = document.getElementById('vectorField').value;
+      const res = await fetch(API_BASE + '/cluster?vector_field=' + encodeURIComponent(field));
+      if (!res.ok) throw new Error('聚类接口请求失败: ' + res.status);
+      return res.json();
+    }
+
+    function render(data) {
+      const list = document.getElementById('groupsList');
+      const idToName = data.id_to_filename || {};
+      const abnormalSet = new Set((data.abnormal_groups || []).map(ag => String(ag.group_id)));
+      const groups = data.groups || [];
+
+      // 统计摘要
+      const realGroups = groups.filter(g => !(typeof g.group_id === 'string' && g.group_id.startsWith('noise_')));
+      const noiseCount = groups.length - realGroups.length;
+      document.getElementById('summary').textContent =
+        realGroups.length + ' 组 · ' + data.total_items + ' 张' + (noiseCount ? ' · ' + noiseCount + ' 单点' : '');
+
+      list.innerHTML = '';
+
+      // 排序：异常组优先，按数量降序，噪声排最后
+      const sorted = [...groups].sort((a, b) => {
+        const aNoise = typeof a.group_id === 'string' && a.group_id.startsWith('noise_');
+        const bNoise = typeof b.group_id === 'string' && b.group_id.startsWith('noise_');
+        if (aNoise !== bNoise) return aNoise ? 1 : -1;
+        const aAb = abnormalSet.has(String(a.group_id));
+        const bAb = abnormalSet.has(String(b.group_id));
+        if (aAb !== bAb) return aAb ? -1 : 1;
+        return b.count - a.count;
+      });
+
+      sorted.forEach(g => {
+        const isAbnormal = abnormalSet.has(String(g.group_id));
+        const isNoise = typeof g.group_id === 'string' && g.group_id.startsWith('noise_');
+
+        const card = document.createElement('div');
+        card.className = 'group-card' + (isAbnormal ? ' abnormal' : '');
+
+        const titleText = isNoise ? '未归组（单点）' : '分组 ' + g.group_id;
+
+        const header = document.createElement('div');
+        header.className = 'group-header';
+        header.innerHTML =
+          '<span class="group-title">' + titleText + '</span>' +
+          (isAbnormal ? '<span class="badge badge-abnormal">异常组</span>' : '') +
+          (isNoise ? '<span class="badge badge-noise">噪声</span>' : '') +
+          '<span class="badge badge-count">' + g.count + ' 张</span>' +
+          '<span class="toggle-icon">▶</span>';
+
+        const imagesDiv = document.createElement('div');
+        imagesDiv.className = 'group-images';
+
+        let built = false;
+        header.addEventListener('click', () => {
+          const isOpen = card.classList.toggle('open');
+          if (isOpen && !built) {
+            built = true;
+            (g.items || []).forEach(id => {
+              const name = idToName[String(id)] || ('id:' + id);
+              const imgCard = document.createElement('div');
+              imgCard.className = 'img-card';
+              imgCard.innerHTML =
+                '<div class="img-wrap">' +
+                  '<img src="' + getImageUrl(id) + '" alt="" loading="lazy"' +
+                  ' onerror="this.parentElement.innerHTML=\'<span style=\'color:#565f89;font-size:0.8rem\'>无图</span>\'">' +
+                '</div>' +
+                '<div class="img-name">' + name + '</div>';
+              imagesDiv.appendChild(imgCard);
+            });
+          }
+        });
+
+        card.appendChild(header);
+        card.appendChild(imagesDiv);
+        list.appendChild(card);
+      });
+
+      list.style.display = 'flex';
+    }
+
+    document.getElementById('vectorField').addEventListener('change', run);
+
+    async function run() {
+      const loading = document.getElementById('loading');
+      const error = document.getElementById('error');
+      const list = document.getElementById('groupsList');
+      loading.style.display = 'block';
+      loading.textContent = '正在加载聚类结果…';
+      error.style.display = 'none';
+      list.style.display = 'none';
+      document.getElementById('summary').textContent = '';
+      try {
+        const data = await loadCluster();
+        loading.style.display = 'none';
+        render(data);
+      } catch (e) {
+        loading.style.display = 'none';
+        error.style.display = 'block';
+        error.textContent = e.message || String(e);
+      }
+    }
+
+    run();
+  </script>
+</body>
+</html>

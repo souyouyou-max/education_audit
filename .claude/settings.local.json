@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python test_template_clustering.py)",
+      "Bash(python3 -c \"import torch; print\\(torch.__version__\\)\")",
+      "Bash(conda env list)",
+      "Bash(/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 -c \"import torch; print\\(''torch'', torch.__version__\\); import transformers; print\\(''transformers'', transformers.__version__\\); import insightface; print\\(''insightface ok''\\)\")",
+      "Bash(/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 test_template_clustering.py)",
+      "Bash(/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 test_template_v2.py)"
+    ]
+  }
+}
