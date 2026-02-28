@@ -255,6 +255,44 @@ def main():
         labels = np.array([remap2[l] if l != -1 else -1 for l in new_labels])
         n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
         print(f"合并后共 {n_clusters} 个簇")
+    # ── 噪声互相配对：噪声点之间 DINOv2 距离 < 0.055 则配对成新簇 ────────
+    NOISE_PAIR_THRESHOLD = 0.055
+    noise_indices = np.where(labels == -1)[0]
+    if len(noise_indices) >= 2:
+        # Union-Find on noise points
+        noise_parent = {idx: idx for idx in noise_indices}
+        def find_n(x):
+            while noise_parent[x] != x:
+                noise_parent[x] = noise_parent[noise_parent[x]]
+                x = noise_parent[x]
+            return x
+        paired = 0
+        for i, ia in enumerate(noise_indices):
+            for ib in noise_indices[i+1:]:
+                d = np.linalg.norm(dino_features[ia] - dino_features[ib])
+                if d < NOISE_PAIR_THRESHOLD:
+                    ra, rb = find_n(ia), find_n(ib)
+                    if ra != rb:
+                        noise_parent[rb] = ra
+                        paired += 1
+        # 分配新标签
+        next_label = max(set(labels)) + 1
+        root_to_label = {}
+        for idx in noise_indices:
+            root = find_n(idx)
+            # 只有 root == idx 的（即簇代表）才分配新标签
+            if root not in root_to_label:
+                root_to_label[root] = next_label
+                next_label += 1
+            labels[idx] = root_to_label[root]
+        # 重新编号
+        unique_new = sorted(set(labels) - {-1})
+        remap3 = {old_l: new_l for new_l, old_l in enumerate(unique_new)}
+        labels = np.array([remap3[l] if l != -1 else -1 for l in labels])
+        n_noise = np.sum(labels == -1)
+        n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+        if paired:
+            print(f"噪声配对：{paired} 次合并，剩余 {n_noise} 个孤立噪声点，共 {n_clusters} 个簇")
     # ────────────────────────────────────────────────────────────────────
 
     # 检验关键图片分组
