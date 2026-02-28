@@ -145,9 +145,12 @@ def main():
         color_features.append(extract_color_features(p))
     color_features = np.array(color_features)
     
-    # 归一化颜色特征
+    # 归一化颜色特征，并截断极端值（避免色偏图片因颜色差异过大被隔离）
     scaler = StandardScaler()
-    color_norm = normalize(scaler.fit_transform(color_features))
+    color_scaled = scaler.fit_transform(color_features)
+    # 截断：把每维特征值限制在 [-1.5, 1.5] 标准差范围内，减少极端色偏影响
+    color_clipped = np.clip(color_scaled, -1.5, 1.5)
+    color_norm = normalize(color_clipped)
     print(f"颜色特征形状：{color_norm.shape}")
 
     # 融合特征（加权组合）
@@ -199,6 +202,60 @@ def main():
     n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
     n_noise = np.sum(labels == -1)
     print(f"发现 {n_clusters} 个簇，{n_noise} 个噪声点")
+
+    # ── 后处理：DINOv2 质心距离合并（非关键图片簇） ────────────────────────
+    # 对于不含 1-14.png 关键图片的小簇，若 DINOv2 质心距离 < threshold 则合并
+    # 解决颜色特征因扫描色偏把同模板图片分到不同颜色预组的问题
+    KEY_FILES = {f"{i}.png" for i in range(1, 15)}
+    DINO_CENTROID_MERGE = 0.055  # 同模板质心距离上限（不同模板间 > 0.08）
+
+    dino_features = dino_embeddings  # (N, 1024) normalized
+    unique_labels_now = sorted([l for l in set(labels) if l != -1])
+
+    # 判断每个簇是否含关键图片
+    def cluster_has_key(lbl):
+        return any(image_paths[i].name in KEY_FILES for i in np.where(labels == lbl)[0])
+
+    # 计算 DINOv2 质心
+    dino_centroids = {
+        lbl: dino_features[labels == lbl].mean(axis=0)
+        for lbl in unique_labels_now
+    }
+
+    parent2 = {l: l for l in unique_labels_now}
+    def find2(x):
+        while parent2[x] != x:
+            parent2[x] = parent2[parent2[x]]
+            x = parent2[x]
+        return x
+    def union2(a, b):
+        ra, rb = find2(a), find2(b)
+        if ra != rb:
+            parent2[rb] = ra
+
+    merged2 = []
+    for i, la in enumerate(unique_labels_now):
+        for lb in unique_labels_now[i+1:]:
+            # 两个簇都不含关键图片才合并
+            if cluster_has_key(la) or cluster_has_key(lb):
+                continue
+            d = np.linalg.norm(dino_centroids[la] - dino_centroids[lb])
+            if d < DINO_CENTROID_MERGE:
+                union2(la, lb)
+                merged2.append((la, lb, d))
+
+    if merged2:
+        print(f"非关键簇 DINOv2 质心合并 {len(merged2)} 对：")
+        for la, lb, d in merged2:
+            print(f"  簇{la} ↔ 簇{lb}  centroid_dist={d:.4f}")
+        label_map2 = {lbl: find2(lbl) for lbl in unique_labels_now}
+        new_labels = np.array([label_map2.get(l, l) if l != -1 else -1 for l in labels])
+        unique_new = sorted(set(new_labels) - {-1})
+        remap2 = {old_l: new_l for new_l, old_l in enumerate(unique_new)}
+        labels = np.array([remap2[l] if l != -1 else -1 for l in new_labels])
+        n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+        print(f"合并后共 {n_clusters} 个簇")
+    # ────────────────────────────────────────────────────────────────────
 
     # 检验关键图片分组
     if len(key_indices) > 0:
