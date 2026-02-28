@@ -6,7 +6,7 @@ import numpy as np
 from typing import List, Tuple, Optional
 import torch
 from PIL import Image, ImageFilter
-from transformers import CLIPProcessor, CLIPModel
+from transformers import CLIPProcessor, CLIPModel, AutoImageProcessor, AutoModel
 import insightface
 from app.config import settings
 
@@ -22,6 +22,8 @@ class VectorService:
     def __init__(self):
         self.clip_model = None
         self.clip_processor = None
+        self.dino_model = None
+        self.dino_processor = None
         self.face_app = None
         self._models_loaded = False
     
@@ -48,6 +50,19 @@ class VectorService:
             logger.error(f"Failed to load CLIP: {e}", exc_info=True)
             raise
         
+        try:
+            # DINOv2（纯视觉自监督模型，用于模板特征提取）
+            logger.info(f"Loading DINOv2 model: {settings.DINO_MODEL_NAME}")
+            self.dino_processor = AutoImageProcessor.from_pretrained(settings.DINO_MODEL_NAME)
+            self.dino_model = AutoModel.from_pretrained(settings.DINO_MODEL_NAME)
+            self.dino_model.eval()
+            if torch.cuda.is_available():
+                self.dino_model = self.dino_model.cuda()
+            logger.info("DINOv2 model loaded")
+        except Exception as e:
+            logger.error(f"Failed to load DINOv2: {e}", exc_info=True)
+            raise
+
         try:
             # InsightFace - 强制使用 buffalo_l（目前社区公认最佳平衡模型）
             model_name = "buffalo_l"  # 或从 settings 读取，但建议硬编码优先级最高模型
@@ -176,13 +191,15 @@ class VectorService:
         return feat
 
     def extract_template_vector(self, image: Image.Image) -> Optional[List[float]]:
-        """提取模板特征向量 —— CLIP结构特征 + HSV颜色特征 混合
+        """提取模板特征向量 —— DINOv2结构特征 + HSV颜色特征 混合
 
-        策略（经测试验证，5/5 正确分组率）：
-        1. CLIP 部分：遮罩人脸和内容区域（灰色填充），提取结构特征（512维）
-        2. HSV 部分：提取边框区域颜色直方图，捕获边框颜色差异（64维）
-        3. HSV 特征加权放大后与 CLIP 拼接，L2归一化
-        4. 最终输出 576 维模板向量
+        策略：
+        1. 遮盖检测到的人脸（灰色填充）
+        2. DINOv2 提取纯视觉结构特征（768维 CLS token）
+           - 纯视觉自监督模型，不受"都是毕业证"文字语义干扰
+           - 对边框样式、排版布局、颜色分布敏感
+        3. HSV 提取边框区域颜色直方图（64维）
+        4. HSV 加权拼接后 L2 归一化，输出 832 维模板向量
         """
         self._ensure_models_loaded()
         try:
@@ -191,7 +208,7 @@ class VectorService:
             h, w = img_array.shape[:2]
             gray = np.array([128, 128, 128], dtype=np.uint8)
 
-            # --- 1. CLIP 特征：遮罩个性化内容 + 灰色填充 ---
+            # 只遮盖人脸（DINOv2无文字语义偏见，不需要遮内容区域）
             processed = img_array.copy()
             try:
                 faces = self.face_app.get(img_array)
@@ -207,14 +224,6 @@ class VectorService:
             except Exception as e:
                 logger.warning(f"Face masking failed: {e}")
 
-            # 保留外侧 CLIP_MASK_RATIO（含院校名/标题），遮掉中心收件人姓名/内容
-            inner_ratio = settings.TEMPLATE_CLIP_MASK_RATIO
-            iy1 = int(h * inner_ratio)
-            iy2 = int(h * (1 - inner_ratio))
-            ix1 = int(w * inner_ratio)
-            ix2 = int(w * (1 - inner_ratio))
-            processed[iy1:iy2, ix1:ix2] = gray
-
             processed_pil = Image.fromarray(processed)
             processed_pil = processed_pil.filter(
                 ImageFilter.GaussianBlur(radius=settings.TEMPLATE_BLUR_RADIUS))
@@ -222,30 +231,31 @@ class VectorService:
             if max(processed_pil.size) > 1024:
                 processed_pil.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
 
+            # --- 1. DINOv2 特征（CLS token，768维） ---
             with torch.no_grad():
-                inputs = self.clip_processor(
-                    images=processed_pil, return_tensors="pt")
+                inputs = self.dino_processor(images=processed_pil, return_tensors="pt")
                 if torch.cuda.is_available():
                     inputs = {
                         k: v.to("cuda") if isinstance(v, torch.Tensor) else v
                         for k, v in inputs.items()
                     }
-                features = self.clip_model.get_image_features(**inputs)
+                outputs = self.dino_model(**inputs)
+                features = outputs.last_hidden_state[:, 0, :]  # CLS token
                 features = features / features.norm(p=2, dim=-1, keepdim=True)
-                clip_vec = features[0].cpu().numpy()
+                dino_vec = features[0].cpu().numpy()
 
-            # --- 2. HSV 颜色直方图特征（边框区域） ---
+            # --- 2. HSV 颜色直方图特征（边框区域，64维） ---
             hsv_vec = self._extract_border_hsv_histogram(img_array)
 
-            # --- 3. 拼接并归一化（HSV 加权 2.0 增强颜色区分度） ---
-            combined = np.concatenate([clip_vec, hsv_vec * 1.5])
+            # --- 3. 拼接并归一化（HSV 加权 1.5） ---
+            combined = np.concatenate([dino_vec, hsv_vec * 1.5])
             norm = np.linalg.norm(combined)
             if norm > 1e-8:
                 combined = combined / norm
 
             vector = combined.tolist()
 
-            expected_dim = settings.TEMPLATE_VECTOR_DIM
+            expected_dim = settings.TEMPLATE_VECTOR_DIM  # 832
             if len(vector) != expected_dim:
                 raise ValueError(
                     f"Template vector dim mismatch: got {len(vector)}, "

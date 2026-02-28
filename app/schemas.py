@@ -71,8 +71,10 @@ class AbnormalGroup(BaseModel):
 
 class ClusterParamsUsed(BaseModel):
     """聚类实际使用的参数（便于核对与调试）"""
-    eps: float
-    min_samples: int
+    eps: Optional[float] = None          # DBSCAN / Agglomerative（旧方案兼容）
+    min_samples: Optional[int] = None    # 同上
+    hdbscan_epsilon: Optional[float] = None  # HDBSCAN cluster_selection_epsilon
+    kmeans_n: Optional[int] = None           # KMeans 预分组数
 
 
 class ClusterResponse(BaseModel):

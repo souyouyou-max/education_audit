@@ -6,7 +6,25 @@
       "Bash(conda env list)",
       "Bash(/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 -c \"import torch; print\\(''torch'', torch.__version__\\); import transformers; print\\(''transformers'', transformers.__version__\\); import insightface; print\\(''insightface ok''\\)\")",
       "Bash(/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 test_template_clustering.py)",
-      "Bash(/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 test_template_v2.py)"
+      "Bash(/Library/Frameworks/Python.framework/Versions/3.11/bin/python3.11 test_template_v2.py)",
+      "Bash(python3:*)",
+      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python3:*)",
+      "Bash(python -c \"from app.cluster_service import cluster_service; print\\(''cluster_service OK''\\)\")",
+      "Bash(python -c \"import app.cluster_images_dinov2; print\\(''standalone OK''\\)\")",
+      "Bash(conda run -n base python -c \"import cv2, torch, hdbscan, scipy; print\\(''All deps OK''\\)\")",
+      "Bash(/opt/homebrew/anaconda3/bin/python3 -c \"import cv2, torch, hdbscan, scipy; print\\(''All deps OK''\\)\")",
+      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python -c \"import cv2, torch, hdbscan, scipy; print\\(''All deps OK''\\)\")",
+      "Bash(pip3 list)",
+      "Bash(python debug_group10_distances.py)",
+      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python -c \"import torch; print\\(''torch ok''\\)\")",
+      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python debug_group10_distances.py)",
+      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/pip list)",
+      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/pip install scikit-learn hdbscan)",
+      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/pip install opencv-python-headless)",
+      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python /Users/songyangyang/Desktop/education_audit/debug_full_pipeline.py)",
+      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python /Users/songyangyang/Desktop/education_audit/debug_hdbscan_methods.py)",
+      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python /Users/songyangyang/Desktop/education_audit/app/cluster_images_dinov2.py --image_dir /Users/songyangyang/Desktop/education_audit/pic --output_dir /tmp/test_cluster_leaf)",
+      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python /Users/songyangyang/Desktop/education_audit/debug_merge_distances.py)"
     ]
   }
 }
