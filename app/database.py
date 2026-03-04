@@ -63,8 +63,10 @@ def _migrate_ocr_results(engine) -> None:
                 conn.execute(text(f"ALTER TABLE ocr_results ADD COLUMN {col_name} {col_def}"))
                 conn.commit()
                 logger.info("Migration: added column ocr_results.%s", col_name)
-            except Exception:
-                pass  # 列已存在（Duplicate column name），忽略
+            except Exception as col_err:
+                err_str = str(col_err)
+                if "Duplicate column name" not in err_str:
+                    logger.warning("Migration unexpected error for %s: %s", col_name, err_str)
 
 
 def get_db() -> Generator[Session, None, None]:

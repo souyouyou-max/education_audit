@@ -2,7 +2,7 @@
 SQLAlchemy ORM 数据模型
 """
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
     Column, BigInteger, Integer, String, Boolean,
     Float, Text, DateTime, ForeignKey,
@@ -19,7 +19,7 @@ class Certificate(Base):
     id = Column(BigInteger, primary_key=True, comment="entity_id，与Milvus一致")
     filename = Column(String(255), comment="原始文件名")
     has_face = Column(Boolean, default=False, comment="是否检测到人脸")
-    upload_time = Column(DateTime, default=datetime.utcnow, comment="上传时间")
+    upload_time = Column(DateTime, default=lambda: datetime.now(timezone.utc), comment="上传时间")
 
 
 class OcrResult(Base):
@@ -44,7 +44,7 @@ class OcrResult(Base):
     birth_year = Column(String(10), comment="出生年份")
     supervisor = Column(String(100), comment="监制单位")
     raw_text = Column(Text, comment="OCR原始文本")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     def to_dict(self):
         return {
@@ -72,7 +72,7 @@ class ForensicResult(Base):
     seal_printed = Column(Boolean, comment="印章是否为打印")
     risk_level = Column(String(10), comment="风险等级：高/中/低")
     risk_flags = Column(Text, comment="风险标记列表（JSON）")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     def get_flags(self):
         try:
@@ -91,7 +91,7 @@ class CrossValidateRun(Base):
     issue_count = Column(Integer, comment="发现问题总数")
     high_severity_count = Column(Integer, comment="高风险问题数")
     message = Column(Text, comment="核验摘要")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class PSDetectionResult(Base):
@@ -112,12 +112,11 @@ class PSDetectionResult(Base):
     # ── 结论 ─────────────────────────────────────────────────────────
     recommendation = Column(String(500), comment="处置建议")
     raw_response = Column(Text, comment="模型原始响应（含thinking链）")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     def _jl(self, col):
-        import json as _j
         try:
-            return _j.loads(col) if col else []
+            return json.loads(col) if col else []
         except Exception:
             return []
 
@@ -139,7 +138,7 @@ class FraudIssue(Base):
     severity = Column(String(10), comment="严重程度：高/中/低")
     related_ids = Column(Text, comment="关联证件ID列表（JSON）")
     issue_type = Column(String(20), default="batch", comment="single/batch")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     def get_related_ids(self):
         try:

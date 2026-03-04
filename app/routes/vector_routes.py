@@ -175,17 +175,13 @@ async def search_similar(request: SearchRequest):
         data = milvus_client.get_by_id(query_id)
         if not data:
             raise HTTPException(status_code=404, detail=f"Record with ID {request.id} not found")
-        if request.vector_field == "image_vector":
-            query_vector = data["image_vector"]
-        elif request.vector_field == "face_vector":
-            query_vector = data["face_vector"]
-        elif request.vector_field == "template_vector":
-            query_vector = data["template_vector"]
-        else:
+        _valid_fields = {"image_vector", "face_vector", "template_vector"}
+        if request.vector_field not in _valid_fields:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid vector_field: {request.vector_field}. Must be one of: image_vector, face_vector, template_vector",
+                detail=f"Invalid vector_field: {request.vector_field}. Must be one of: {', '.join(sorted(_valid_fields))}",
             )
+        query_vector = data[request.vector_field]
     elif request.image_vector:
         query_vector = request.image_vector
         request.vector_field = "image_vector"
@@ -272,14 +268,10 @@ async def search_by_image(
     image = load_image_from_bytes(file_content)
     image_vector, face_vector, template_vector = vector_service.extract_all_vectors(image)
 
-    if vector_field == "image_vector":
-        query_vector = image_vector
-    elif vector_field == "face_vector":
-        query_vector = face_vector
-    elif vector_field == "template_vector":
-        query_vector = template_vector
-    else:
-        raise HTTPException(status_code=400, detail=f"Invalid vector_field: {vector_field}")
+    _vec_map = {"image_vector": image_vector, "face_vector": face_vector, "template_vector": template_vector}
+    if vector_field not in _vec_map:
+        raise HTTPException(status_code=400, detail=f"Invalid vector_field: {vector_field}. Must be one of: image_vector, face_vector, template_vector")
+    query_vector = _vec_map[vector_field]
 
     results = milvus_client.search(vector_field=vector_field, query_vector=query_vector, top_k=top_k)
 

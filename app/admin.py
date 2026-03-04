@@ -218,6 +218,13 @@ class CrossValidateRunAdmin(ModelView, model=CrossValidateRun):
 
 def setup_admin(app, engine) -> None:
     """初始化并挂载 SQLAdmin，需在 init_db() 之后调用"""
+    import logging as _logging
+    _log = _logging.getLogger(__name__)
+    if "change-in-production" in settings.SECRET_KEY or settings.ADMIN_PASSWORD == "admin123":
+        _log.warning(
+            "⚠️  Admin using default credentials/SECRET_KEY — set ADMIN_USERNAME, "
+            "ADMIN_PASSWORD, SECRET_KEY env vars before deploying to production!"
+        )
     authentication_backend = _AdminAuth(secret_key=settings.SECRET_KEY)
     admin = Admin(
         app,
