@@ -563,7 +563,8 @@
           <span id="psbadge_${esc(item.id)}">${item.ps_data ? psBadge(item.ps_data) : ''}</span>
         </div>
         ${fieldsHtml}
-        ${rawHtml}
+        ${psDetailsHtml}
+    ${rawHtml}
         <div class="cert-actions">${actions}</div>
       </div>
     </div>`;
@@ -593,6 +594,52 @@
     }
     const tip = lines.join('\n');
     return `<span class="badge ${cls}" title="${tip.replace(/"/g, '&quot;')}" style="cursor:default">🔍 ${label}</span>`;
+  }
+
+  // 渲染 PS 详情展开区域
+  function renderPsDetails(id, ps) {
+    if (!ps) return '';
+    const level = ps.risk_level || '低';
+    const blockClass = level === '高' ? 'ps-high' : (level === '中' ? 'ps-mid' : 'ps-low');
+    
+    let html = `<div class="ps-block ${blockClass}" id="psdetail_${id}">`;
+    html += `<div class="ps-header">`;
+    html += `<span>🔍 PS 鉴别结果</span>`;
+    if (ps.overall_authenticity) html += `<span class="badge badge-${level === '高' ? 'red' : (level === '中' ? 'orange' : 'blue')}">${esc(ps.overall_authenticity)}</span>`;
+    html += `</div>`;
+    
+    if (ps.tampering_probability != null) {
+      html += `<div class="ps-summary">篡改概率: <b>${Math.round(ps.tampering_probability)}%</b>`;
+      if (ps.confidence != null) html += ` &nbsp;|&nbsp; 置信度: <b>${Math.round(ps.confidence)}%</b>`;
+      html += `</div>`;
+    }
+    
+    if (ps.recommendation) {
+      html += `<div class="ps-summary">建议: ${esc(ps.recommendation)}</div>`;
+    }
+    
+    const ev = ps.key_evidence || [];
+    if (ev.length) {
+      html += `<div style="font-size:0.75rem;color:#a9b1d6;margin:4px 0 2px;">疑点证据:</div>`;
+      html += `<ul class="ps-reasons">`;
+      ev.forEach(r => html += `<li>${esc(r)}</li>`);
+      html += `</ul>`;
+    }
+    
+    const sr = ps.suspect_regions || [];
+    if (sr.length) {
+      html += `<div style="font-size:0.75rem;color:#a9b1d6;margin:4px 0 2px;">可疑区域:</div>`;
+      html += `<ul class="ps-reasons">`;
+      sr.forEach(r => {
+        const desc = r.description || '';
+        const reason = r.reason || '';
+        html += `<li>${esc(desc)}${reason ? '：' + esc(reason) : ''}</li>`;
+      });
+      html += `</ul>`;
+    }
+    
+    html += `</div>`;
+    return html;
   }
 
   function toggleRaw(id) {
