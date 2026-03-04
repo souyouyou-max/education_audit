@@ -545,6 +545,12 @@
         <div class="raw-text-box" id="${rawId}">${esc(item.raw_text)}</div>`;
     }
 
+    // PS 详情区
+    let psDetailsHtml = '';
+    if (item.ps_data) {
+      psDetailsHtml = renderPsDetails(item.id, item.ps_data);
+    }
+
     // 操作按钮
     const btnId = 'btn_' + item.id;
     const actions = item.ocr_done
