@@ -163,8 +163,8 @@
       border-right: 1px solid #363b54;
     }
     .cert-img-wrap img {
-      max-width: 136px;
-      max-height: 180px;
+      max-width: 200px;
+      max-height: 260px;
       object-fit: contain;
       border-radius: 4px;
       display: block;
@@ -515,7 +515,7 @@
       : '<span class="badge badge-grey">未识别</span>';
 
     // 图片区
-    const imgHtml = `<img src="/api/image/${esc(item.id)}" alt="${esc(item.filename)}" loading="lazy" ondblclick="openLightbox(this.src)" style="cursor:zoom-in" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
+    const imgHtml = `<img src="/api/image/${esc(item.id)}" alt="${esc(item.filename)}" loading="lazy" onclick="openLightbox(this.src)" style="cursor:zoom-in" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
       <div class="cert-img-placeholder" style="display:none">无图片</div>`;
 
     // 字段区
