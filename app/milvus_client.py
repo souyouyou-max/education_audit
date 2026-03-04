@@ -142,10 +142,16 @@ class MilvusClient:
                 logger.error("Rollback failed for entity_id=%s: %s", entity_id, rollback_err)
             raise
 
-        # Milvus 2.x 的 growing segment 插入后立即可搜索，无需手动 flush。
-        # flush() 是落盘操作（将 growing → sealed），会阻塞 Milvus 服务端，
-        # 大量并发上传时会导致 search gRPC 请求排队，使搜索超时。
-        # Milvus 会按 dataCoord.segment.sealProposePolicy 自动 flush，不需要手动触发。
+        # Milvus 2.x 的 growing segment 插入后立即可搜索，但性能较差。
+        # 如果用户需要"上传后立即搜索"，建议调用 flush 确保数据进入索引。
+        # 批量上传时保持自动 flush（避免阻塞），单张上传时可以手动 flush。
+        # 这里改为：单张上传时 flush，保证上传后可立即被搜到。
+        try:
+            self.col_image.flush()
+            self.col_face.flush()
+            self.col_template.flush()
+        except Exception as flush_err:
+            logger.warning("flush warning (can ignore if search works): %s", flush_err)
 
         return entity_id
 

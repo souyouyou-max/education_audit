@@ -284,9 +284,15 @@ async def cluster_analysis(vector_field: str = "image_vector"):
 async def search_by_image(
     file: UploadFile = File(...),
     vector_field: str = Form(default="image_vector"),
-    top_k: int = Form(default=5),
+    top_k: int = Form(default=20),  # 增大默认 top_k，避免原图排在前5之外
+    include_self: bool = Form(default=True),  # 是否包含自己（原图）
 ):
-    """通过上传图片进行相似度搜索"""
+    """通过上传图片进行相似度搜索
+    
+    Args:
+        top_k: 返回最相似的 N 个结果，默认 20（原 5 太小，大数据集时原图可能排第6+）
+        include_self: 是否保留查询图片本身的结果（同一张图 distance 应为 0）
+    """
     import asyncio
     loop = asyncio.get_running_loop()
 
@@ -311,6 +317,24 @@ async def search_by_image(
         None,
         lambda: milvus_client.search(vector_field=vector_field, query_vector=query_vector, top_k=top_k),
     )
+
+    # 调试日志：打印搜索结果，帮助排查"匹配不到原图"问题
+    if results:
+        logger.info(
+            "search_by_image: field=%s, top_k=%d, returned=%d, best_match=id=%s distance=%.4f score=%.4f",
+            vector_field, top_k, len(results),
+            results[0]["id"], results[0]["distance"], results[0]["score"]
+        )
+        # 检查是否有 distance < 0.001 的（应该是原图自己）
+        self_matches = [r for r in results if r["distance"] < 0.001]
+        if self_matches:
+            logger.info("search_by_image: found %d self-matches (distance<0.001)", len(self_matches))
+        else:
+            logger.warning("search_by_image: no self-match found (distance<0.001), closest distance=%.4f", results[0]["distance"])
+
+    if not include_self:
+        # 过滤掉 distance < 0.001 的自己（原图）
+        results = [r for r in results if r["distance"] >= 0.001]
 
     formatted_results = [
         SearchResultItem(
