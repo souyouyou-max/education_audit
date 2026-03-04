@@ -40,8 +40,14 @@ class ForensicService:
         ela_mean = float(np.mean(ela))
         bright_ratio = float(np.mean(ela > 50))
 
-        # 高方差 或 大面积高亮 → 可疑
-        is_suspicious = ela_std > 25 or bright_ratio > 0.15
+        # 扫描件本身噪声较大，单纯 std>25 误报率极高。
+        # 改为：std 超过较高阈值（45）OR 高亮面积比例超过较高阈值（0.20），才标记可疑。
+        # 或者 std 在 25-45 之间 AND 高亮面积也明显（0.10），取交集降低误报。
+        is_suspicious = (
+            ela_std > 45
+            or bright_ratio > 0.20
+            or (ela_std > 25 and bright_ratio > 0.10)
+        )
 
         return {
             "ela_std": round(ela_std, 2),

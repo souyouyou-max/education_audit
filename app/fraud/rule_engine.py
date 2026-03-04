@@ -226,10 +226,16 @@ class RuleEngine:
                 })
 
         # 规则10：证书编号高度相似（不同人、不同编号）
-        for i in range(len(cert_nos)):
-            for j in range(i + 1, len(cert_nos)):
-                id1, no1 = cert_nos[i]
-                id2, no2 = cert_nos[j]
+        # 优化：先按长度排序，跳过长度差超过阈值的编号对（长度差 > len*0.2 时相似度必 < 0.85）
+        cert_nos_sorted = sorted(cert_nos, key=lambda x: len(x[1]))
+        for i in range(len(cert_nos_sorted)):
+            id1, no1 = cert_nos_sorted[i]
+            len1 = len(no1)
+            for j in range(i + 1, len(cert_nos_sorted)):
+                id2, no2 = cert_nos_sorted[j]
+                # 长度剪枝：若长度差过大，相似度不可能达到阈值，直接跳出内层
+                if len(no2) - len1 > max(len1, len(no2)) * (1 - CERT_NO_SIMILARITY_THRESHOLD) + 1:
+                    break
                 if no1 == no2:
                     continue  # 已被规则9覆盖
                 sim = _str_similar(no1, no2)

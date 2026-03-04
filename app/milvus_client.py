@@ -36,13 +36,11 @@ class MilvusClient:
 
     def _get_collection(self, vector_field: str) -> Optional[Collection]:
         """根据向量字段名获取对应 collection"""
-        if vector_field == "image_vector":
-            return self.col_image
-        if vector_field == "face_vector":
-            return self.col_face
-        if vector_field == "template_vector":
-            return self.col_template
-        return None
+        return {
+            "image_vector":    self.col_image,
+            "face_vector":     self.col_face,
+            "template_vector": self.col_template,
+        }.get(vector_field)
 
     def connect(self):
         """连接 Milvus"""
@@ -129,14 +127,24 @@ class MilvusClient:
         self.create_collection_if_not_exists()
 
         # 先插入 image，得到 entity_id（auto_id 时 insert 返回的 primary_keys 即为新 id）
-        # row-based 插入时每字段为该行的值，向量为 list[float] 而非 list of vectors
         res = self.col_image.insert({"image_vector": image_vector})
-        self.col_image.flush()
         entity_id = res.primary_keys[0]
 
-        self.col_face.insert({"entity_id": entity_id, "face_vector": face_vector})
+        try:
+            self.col_face.insert({"entity_id": entity_id, "face_vector": face_vector})
+            self.col_template.insert({"entity_id": entity_id, "template_vector": template_vector})
+        except Exception as e:
+            # 任一子集合插入失败时，尝试删除 image 集合中已插入的记录以保持一致性
+            logger.error("insert failed for entity_id=%s, attempting rollback: %s", entity_id, e)
+            try:
+                self.col_image.delete(f"id in [{entity_id}]")
+            except Exception as rollback_err:
+                logger.error("Rollback failed for entity_id=%s: %s", entity_id, rollback_err)
+            raise
+
+        # 三个集合都插入成功后统一 flush 一次（flush 是落盘操作，应尽量合并）
+        self.col_image.flush()
         self.col_face.flush()
-        self.col_template.insert({"entity_id": entity_id, "template_vector": template_vector})
         self.col_template.flush()
 
         return entity_id
@@ -188,8 +196,24 @@ class MilvusClient:
         _, vec_name, _ = VECTOR_FIELD_CONFIG[vector_field]
         col.load()
         id_field = "id" if vector_field == "image_vector" else "entity_id"
-        results = col.query(expr="id >= 0", output_fields=[id_field, vec_name])
-        return {r[id_field]: r[vec_name] for r in results}
+        # Milvus query 默认上限 16384，用分页拉取全量数据避免截断
+        all_results = []
+        offset = 0
+        page_size = 8192
+        while True:
+            batch = col.query(
+                expr="id >= 0",
+                output_fields=[id_field, vec_name],
+                limit=page_size,
+                offset=offset,
+            )
+            if not batch:
+                break
+            all_results.extend(batch)
+            if len(batch) < page_size:
+                break
+            offset += page_size
+        return {r[id_field]: r[vec_name] for r in all_results}
 
     def get_by_id(self, entity_id: int) -> Optional[Dict[str, Any]]:
         """根据 entity_id 获取三条向量"""
