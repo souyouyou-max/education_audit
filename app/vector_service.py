@@ -5,7 +5,8 @@ import logging
 import numpy as np
 from typing import List, Tuple, Optional
 import torch
-from PIL import Image, ImageFilter
+from PIL import Image, ImageFile, ImageFilter
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 from transformers import CLIPProcessor, CLIPModel, AutoImageProcessor, AutoModel
 import insightface
 from app.config import settings
@@ -81,7 +82,9 @@ class VectorService:
         """提取整体图像向量（CLIP）"""
         self._ensure_models_loaded()
         try:
-            # 建议：预先resize到合理尺寸，避免OOM或精度损失
+            # 强制加载像素数据：ImageFile 的延迟加载可能在 fp=None 时触发 AssertionError
+            if hasattr(image, 'tile') and image.tile:
+                image.load()
             image = image.convert("RGB")
             if max(image.size) > 1024:
                 image.thumbnail((1024, 1024), Image.Resampling.LANCZOS)
@@ -106,16 +109,19 @@ class VectorService:
             logger.error("Image vector extraction failed: %s", e, exc_info=True)
             raise
     
-    def extract_face_vector(self, image: Image.Image, min_quality_score: float = 0.5) -> Tuple[List[float], bool]:
+    def extract_face_vector(self, image: Image.Image, min_quality_score: float = 0.5,
+                            _faces=None) -> Tuple[List[float], bool]:
         """提取人脸向量（InsightFace），增加质量过滤
-        
+
+        Args:
+            _faces: 预先检测好的人脸列表（由 extract_all_vectors 传入以避免重复检测）
         Returns:
             (vector, success): 成功时返回向量+True，失败返回None+False
         """
         self._ensure_models_loaded()
         try:
             img_array = np.array(image.convert("RGB"))
-            faces = self.face_app.get(img_array)
+            faces = _faces if _faces is not None else self.face_app.get(img_array)
             
             if not faces:
                 logger.debug("No face detected")
@@ -189,16 +195,20 @@ class VectorService:
             feat = feat / norm
         return feat
 
-    def extract_template_vector(self, image: Image.Image) -> Optional[List[float]]:
+    def extract_template_vector(self, image: Image.Image,
+                                _faces=None) -> Optional[List[float]]:
         """提取模板特征向量 —— DINOv2结构特征 + HSV颜色特征 混合
 
         策略：
         1. 遮盖检测到的人脸（灰色填充）
-        2. DINOv2 提取纯视觉结构特征（768维 CLS token）
+        2. DINOv2-large 提取纯视觉结构特征（1024维 CLS token）
            - 纯视觉自监督模型，不受"都是毕业证"文字语义干扰
            - 对边框样式、排版布局、颜色分布敏感
         3. HSV 提取边框区域颜色直方图（64维）
-        4. HSV 加权拼接后 L2 归一化，输出 832 维模板向量
+        4. HSV×1.5 加权拼接后 L2 归一化，输出 1088 维模板向量（1024 + 64）
+
+        Args:
+            _faces: 预先检测好的人脸列表（由 extract_all_vectors 传入以避免重复检测）
         """
         self._ensure_models_loaded()
         try:
@@ -210,7 +220,7 @@ class VectorService:
             # 只遮盖人脸（DINOv2无文字语义偏见，不需要遮内容区域）
             processed = img_array.copy()
             try:
-                faces = self.face_app.get(img_array)
+                faces = _faces if _faces is not None else self.face_app.get(img_array)
                 for face in faces:
                     bbox = face.bbox.astype(int)
                     fw, fh = bbox[2] - bbox[0], bbox[3] - bbox[1]
@@ -254,7 +264,7 @@ class VectorService:
 
             vector = combined.tolist()
 
-            expected_dim = settings.TEMPLATE_VECTOR_DIM  # 832
+            expected_dim = settings.TEMPLATE_VECTOR_DIM  # 1088 = DINOv2-large(1024) + HSV(64)
             if len(vector) != expected_dim:
                 raise ValueError(
                     f"Template vector dim mismatch: got {len(vector)}, "
@@ -296,20 +306,59 @@ class VectorService:
             return None
 
     def extract_all_vectors(self, image: Image.Image) -> Tuple[List[float], List[float], List[float]]:
-        """提取所有向量，失败字段返回零向量（Milvus 不接受 None）"""
-        image_vec = None
-        face_vec = None
+        """提取所有向量，失败字段返回零向量（Milvus 不接受 None）
+
+        并发优化：
+        - CLIP 和 InsightFace 用两个线程同时跑（两者独立，都会释放 GIL）
+        - 人脸检测结果共享给 face_vector 和 template_vector，只跑一次
+        - DINOv2 在两者完成后串行执行（依赖人脸检测结果）
+        """
+        import threading
+        self._ensure_models_loaded()
+
+        # 预先将 PIL Image 转换为 numpy 数组（线程安全），避免多线程同时操作同一 PIL 对象
+        # PIL Image 非线程安全：两个线程同时调用 .convert("RGB") 会导致 JPEG fp 状态竞争
+        img_rgb   = image.convert("RGB")
+        img_array = np.array(img_rgb)
+
+        image_vec_box: List = [None]
+        faces_box:     List = [[]]
+
+        def _run_clip():
+            try:
+                # 每个线程独立创建 PIL Image，避免共享 fp 状态
+                clip_img = Image.fromarray(img_array)
+                image_vec_box[0] = self.extract_image_vector(clip_img)
+            except Exception as e:
+                logger.error("extract_image_vector failed: %s", e)
+
+        def _run_face():
+            try:
+                faces_box[0] = self.face_app.get(img_array)
+            except Exception as e:
+                logger.warning("Face detection failed: %s", e)
+
+        # CLIP 和 InsightFace 并行
+        t_clip = threading.Thread(target=_run_clip, daemon=True)
+        t_face = threading.Thread(target=_run_face, daemon=True)
+        t_clip.start()
+        t_face.start()
+        t_clip.join()
+        t_face.join()
+
+        image_vec      = image_vec_box[0]
+        detected_faces = faces_box[0]
+
+        # 串行调用使用独立 PIL Image（fromarray，无 fp 依赖）
+        face_img = Image.fromarray(img_array)
+
+        # 人脸向量：从已检测结果直接提取，无需重跑
+        face_vec, _ = self.extract_face_vector(face_img, _faces=detected_faces)
+
+        # DINOv2 模板向量：依赖人脸遮盖，在人脸检测完成后串行
         template_vec = None
-
         try:
-            image_vec = self.extract_image_vector(image)
-        except Exception as e:
-            logger.error("extract_image_vector failed: %s", e)
-
-        face_vec, _ = self.extract_face_vector(image)
-
-        try:
-            template_vec = self.extract_template_vector(image)
+            template_vec = self.extract_template_vector(face_img, _faces=detected_faces)
         except Exception as e:
             logger.error("extract_template_vector failed: %s", e)
 

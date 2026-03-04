@@ -31,7 +31,10 @@
       "Bash(pip install:*)",
       "Bash(python -c \":*)",
       "Bash(wc:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(git add app/config.py app/fraud/ocr_service.py app/fraud/ps_service.py app/main.py app/routes/vector_routes.py requirements.txt static/admin.html app/admin.py static/search.html)",
+      "Bash(git commit:*)",
+      "Bash(git push origin master)"
     ]
   }
 }

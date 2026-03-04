@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 class UploadResponse(BaseModel):
     """单张上传响应（保留兼容）"""
-    id: int
+    id: str          # 字符串 ID，防止 JS 大整数精度丢失（Milvus ID 超过 Number.MAX_SAFE_INTEGER）
     message: str
     has_face: bool
 
@@ -15,7 +15,7 @@ class UploadResponse(BaseModel):
 class BatchUploadItem(BaseModel):
     """批量上传中单条结果"""
     filename: str
-    id: Optional[int] = None
+    id: Optional[str] = None  # 字符串 ID，防止 JS 大整数精度丢失
     has_face: bool = False
     success: bool = True
     error: Optional[str] = None
@@ -31,7 +31,7 @@ class BatchUploadResponse(BaseModel):
 
 class SearchRequest(BaseModel):
     """搜索请求"""
-    id: Optional[int] = None
+    id: Optional[str] = None  # 接受字符串 ID（前端用字符串防精度丢失）；服务端内部用 int(id) 转换
     image_vector: Optional[List[float]] = None
     face_vector: Optional[List[float]] = None
     template_vector: Optional[List[float]] = None
@@ -41,7 +41,7 @@ class SearchRequest(BaseModel):
 
 class SearchResultItem(BaseModel):
     """搜索结果项"""
-    id: int
+    id: str      # 字符串 ID，防止 JS 大整数精度丢失（Milvus ID 超过 Number.MAX_SAFE_INTEGER）
     score: float
     distance: float
     abnormal: bool = False
@@ -49,7 +49,7 @@ class SearchResultItem(BaseModel):
 
 class SearchResponse(BaseModel):
     """搜索响应"""
-    query_id: Optional[int] = None
+    query_id: Optional[str] = None  # 字符串 ID，防止 JS 大整数精度丢失
     results: List[SearchResultItem]
     total: int
 
@@ -126,7 +126,7 @@ class OcrFields(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     """单张证件全面分析响应"""
-    entity_id: int
+    entity_id: str  # 字符串 ID，防止 JS 大整数精度丢失
     filename: Optional[str] = None
     ocr_fields: Optional[OcrFields] = None
     face_info: Optional[FaceInfo] = None

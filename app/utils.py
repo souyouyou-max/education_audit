@@ -38,6 +38,7 @@ def load_image_from_bytes(file_content: bytes) -> Image.Image:
     """从字节流加载图片"""
     try:
         image = Image.open(io.BytesIO(file_content))
+        image.load()  # 立即读取所有像素数据，防止 fp 被 JPEG 插件置 None 后延迟加载失败
         if image.mode != 'RGB':
             image = image.convert('RGB')
         return image

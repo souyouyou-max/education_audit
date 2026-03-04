@@ -118,7 +118,7 @@ async def analyze_certificate(entity_id: int):
     save_single_analyze_issues(entity_id, [i.model_dump() for i in rule_issues])
 
     return AnalyzeResponse(
-        entity_id=entity_id,
+        entity_id=str(entity_id),  # 转字符串，防止 JS 大整数精度丢失
         filename=filename,
         ocr_fields=ocr_fields,
         face_info=face_info,

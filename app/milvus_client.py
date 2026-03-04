@@ -142,17 +142,24 @@ class MilvusClient:
                 logger.error("Rollback failed for entity_id=%s: %s", entity_id, rollback_err)
             raise
 
-        # 三个集合都插入成功后统一 flush 一次（flush 是落盘操作，应尽量合并）
-        self.col_image.flush()
-        self.col_face.flush()
-        self.col_template.flush()
+        # Milvus 2.x 的 growing segment 插入后立即可搜索，无需手动 flush。
+        # flush() 是落盘操作（将 growing → sealed），会阻塞 Milvus 服务端，
+        # 大量并发上传时会导致 search gRPC 请求排队，使搜索超时。
+        # Milvus 会按 dataCoord.segment.sealProposePolicy 自动 flush，不需要手动触发。
 
         return entity_id
+
+    def _ensure_collections_ready(self):
+        """确保集合对象已就绪：若已初始化则直接返回，否则调用 create_collection_if_not_exists。
+        这样 search/get_by_id 等热路径不会在每次调用时都做 3 次 gRPC has_collection 检查。
+        """
+        if self.col_image is None or self.col_face is None or self.col_template is None:
+            self.create_collection_if_not_exists()
 
     def search(self, vector_field: str, query_vector: List[float],
                top_k: int = None, expr: Optional[str] = None) -> List[Dict[str, Any]]:
         """相似度搜索，返回的 id 为 entity_id"""
-        self.create_collection_if_not_exists()
+        self._ensure_collections_ready()
         col = self._get_collection(vector_field)
         if not col:
             raise ValueError(f"Unknown vector_field: {vector_field}")
@@ -188,7 +195,7 @@ class MilvusClient:
 
     def get_all_vectors(self, vector_field: str) -> Dict[int, List[float]]:
         """获取指定向量字段的全部向量，key 为 entity_id"""
-        self.create_collection_if_not_exists()
+        self._ensure_collections_ready()
         col = self._get_collection(vector_field)
         if not col:
             raise ValueError(f"Unknown vector_field: {vector_field}")
@@ -196,28 +203,12 @@ class MilvusClient:
         _, vec_name, _ = VECTOR_FIELD_CONFIG[vector_field]
         col.load()
         id_field = "id" if vector_field == "image_vector" else "entity_id"
-        # Milvus query 默认上限 16384，用分页拉取全量数据避免截断
-        all_results = []
-        offset = 0
-        page_size = 8192
-        while True:
-            batch = col.query(
-                expr="id >= 0",
-                output_fields=[id_field, vec_name],
-                limit=page_size,
-                offset=offset,
-            )
-            if not batch:
-                break
-            all_results.extend(batch)
-            if len(batch) < page_size:
-                break
-            offset += page_size
-        return {r[id_field]: r[vec_name] for r in all_results}
+        results = col.query(expr="id >= 0", output_fields=[id_field, vec_name])
+        return {r[id_field]: r[vec_name] for r in results}
 
     def get_by_id(self, entity_id: int) -> Optional[Dict[str, Any]]:
         """根据 entity_id 获取三条向量"""
-        self.create_collection_if_not_exists()
+        self._ensure_collections_ready()
         self.col_image.load()
         self.col_face.load()
         self.col_template.load()
@@ -232,6 +223,26 @@ class MilvusClient:
         out["face_vector"] = face[0]["face_vector"] if face else []
         out["template_vector"] = tpl[0]["template_vector"] if tpl else []
         return out
+
+    def get_all_entity_ids(self) -> List[int]:
+        """获取全部 entity_id 列表（从 image 集合查询，id 即 entity_id）"""
+        self._ensure_collections_ready()
+        self.col_image.load()
+        results = self.col_image.query(expr="id >= 0", output_fields=["id"])
+        return [r["id"] for r in results]
+
+    def delete_by_id(self, entity_id: int) -> None:
+        """从三个集合中删除指定 entity_id 的所有记录（上传回滚或清理孤儿记录用）"""
+        self._ensure_collections_ready()
+        for col, expr in [
+            (self.col_image,    f"id in [{entity_id}]"),
+            (self.col_face,     f"entity_id in [{entity_id}]"),
+            (self.col_template, f"entity_id in [{entity_id}]"),
+        ]:
+            try:
+                col.delete(expr)
+            except Exception as e:
+                logger.warning("delete_by_id failed for %s on %s: %s", entity_id, col.name, e)
 
     def get_collection_stats(self) -> Dict[str, Any]:
         """统计以 image 集合实体数为准"""

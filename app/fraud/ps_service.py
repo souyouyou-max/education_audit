@@ -202,7 +202,16 @@ class PSDetectionService:
             return {k: v for k, v in result.items() if not k.startswith("_")}
         except Exception as e:
             logger.error("PS detection failed for entity_id=%s: %s", entity_id, e)
-            return {"risk_level": "未知", "reasons": [str(e)], "confidence": None, "summary": "检测失败"}
+            return {
+                "overall_authenticity": "未知",
+                "risk_level": "未知",
+                "tampering_probability": None,
+                "confidence": None,
+                "key_evidence": [str(e)],
+                "no_tampering_evidence": [],
+                "suspect_regions": [],
+                "recommendation": "检测失败，请重试",
+            }
 
     def redetect_and_save(self, entity_id: int, image: Image.Image) -> Dict[str, Any]:
         """强制重新检测（忽略缓存）"""
@@ -222,7 +231,16 @@ class PSDetectionService:
             return {k: v for k, v in result.items() if not k.startswith("_")}
         except Exception as e:
             logger.error("PS re-detection failed for entity_id=%s: %s", entity_id, e)
-            return {"risk_level": "未知", "reasons": [str(e)], "confidence": None, "summary": "检测失败"}
+            return {
+                "overall_authenticity": "未知",
+                "risk_level": "未知",
+                "tampering_probability": None,
+                "confidence": None,
+                "key_evidence": [str(e)],
+                "no_tampering_evidence": [],
+                "suspect_regions": [],
+                "recommendation": "检测失败，请重试",
+            }
 
 
 ps_detection_service = PSDetectionService()
