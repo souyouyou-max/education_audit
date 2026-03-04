@@ -112,7 +112,8 @@ async def analyze_certificate(entity_id: int):
         else ("中" if rule_issues or forensic_flags else "低")
     )
 
-    save_ocr_result(entity_id, raw_fields)
+    # save_ocr_result 不再重复调用：extract_and_cache() 内部已写入完整字段
+    # 再调用一次 save_ocr_result 会用字段不完整的旧版本覆盖完整数据
     save_forensic_result(entity_id, forensic_result)
     save_single_analyze_issues(entity_id, [i.model_dump() for i in rule_issues])
 
@@ -156,29 +157,45 @@ async def cross_validate(
             message="尚未上传任何证件",
         )
 
-    id_image_map: dict = {}
+    # 按需加载图片（避免预加载所有图片导致 OOM）
+    id_path_map: dict = {}
     for id_str in id_to_name:
         try:
             entity_id = int(id_str)
             img_path = get_image_path_by_id(entity_id)
             if img_path:
-                id_image_map[entity_id] = Image.open(img_path).convert("RGB")
+                id_path_map[entity_id] = img_path
         except Exception as e:
-            logger.warning("Failed to load image id=%s: %s", id_str, e)
+            logger.warning("Failed to locate image id=%s: %s", id_str, e)
+
+    def _load_images(id_path: dict) -> dict:
+        """按需打开图片，跳过无法读取的"""
+        result = {}
+        for eid, path in id_path.items():
+            try:
+                result[eid] = Image.open(path).convert("RGB")
+            except Exception as e:
+                logger.warning("Failed to open image id=%s: %s", eid, e)
+        return result
 
     try:
-        all_fields = ocr_service.run_batch(id_image_map)
+        # run_batch 只对无缓存的 ID 调用 OCR API，先传路径映射转图片
+        id_image_map_for_ocr = _load_images(id_path_map)
+        all_fields = ocr_service.run_batch(id_image_map_for_ocr)
         ocr_success = sum(1 for f in all_fields.values() if not f.get("_ocr_error"))
     except RuntimeError as e:
         logger.warning("OCR unavailable: %s", e)
         all_fields = ocr_service.get_all_cached()
         ocr_success = len(all_fields)
+        id_image_map_for_ocr = {}
 
     issues_raw = rule_engine.check_batch(all_fields)
 
-    if run_phash and id_image_map:
+    if run_phash and id_path_map:
         try:
-            phash_issues = forensic_service.compare_regions_batch(id_image_map)
+            # phash 批量比对时才按需加载全量图片
+            id_image_map_phash = _load_images(id_path_map)
+            phash_issues = forensic_service.compare_regions_batch(id_image_map_phash)
             issues_raw.extend(phash_issues)
         except Exception as e:
             logger.warning("Phash compare failed: %s", e)

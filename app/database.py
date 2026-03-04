@@ -125,7 +125,7 @@ def save_certificate(entity_id: int, filename: str, has_face: bool) -> None:
 
 
 def save_ocr_result(entity_id: int, fields: dict) -> None:
-    """保存OCR结果（已存在则覆盖）"""
+    """保存OCR结果（已存在则覆盖，写入全部字段）"""
     from app.models import OcrResult
     if not is_db_available():
         return
@@ -135,15 +135,21 @@ def save_ocr_result(entity_id: int, fields: dict) -> None:
             db.query(OcrResult).filter(OcrResult.entity_id == entity_id).delete()
             db.add(OcrResult(
                 entity_id=entity_id,
+                cert_type=fields.get("cert_type"),
+                student_name=fields.get("student_name"),
                 school=fields.get("school"),
+                department=fields.get("department"),
                 principal=fields.get("principal"),
                 grad_year=fields.get("grad_year"),
                 enrollment_year=fields.get("enrollment_year"),
                 issue_year=fields.get("issue_year"),
+                issue_date=fields.get("issue_date"),
                 cert_no=fields.get("cert_no"),
+                student_id_no=fields.get("student_id_no"),
                 gender=fields.get("gender"),
                 birth_year=fields.get("birth_year"),
-                raw_text=fields.get("_raw_text", "")[:10000],  # 截断防超长
+                supervisor=fields.get("supervisor"),
+                raw_text=(fields.get("_raw_text") or "")[:10000],
             ))
     except Exception as e:
         logger.warning("save_ocr_result failed: %s", e)
@@ -254,8 +260,10 @@ def _migrate_ps_results(engine) -> None:
                 conn.execute(text(f"ALTER TABLE ps_detection_results ADD COLUMN {col_name} {col_def}"))
                 conn.commit()
                 logger.info("Migration: added column ps_detection_results.%s", col_name)
-            except Exception:
-                pass  # 列已存在，忽略
+            except Exception as col_err:
+                err_str = str(col_err)
+                if "Duplicate column name" not in err_str:
+                    logger.warning("Migration unexpected error for %s: %s", col_name, err_str)
 
 
 def save_ps_result(entity_id: int, result: dict) -> None:

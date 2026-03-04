@@ -232,38 +232,33 @@ def _cn_to_year(s: str) -> Optional[str]:
 
 
 def _cn_to_num(s: str) -> Optional[int]:
-    """中文数字(1-31)→整数，支持 廿/卅 前缀，用于月份和日期解析"""
+    """中文数字(1-31)→整数，支持 廿/卅/十 前缀，用于月份和日期解析"""
     s = s.strip()
     if not s:
         return None
-    # 廿x（20-29）
+    # 廿x（20-29）：廿 or 廿+个位
     if s[0] == '廿':
         rest = s[1:]
         d = int(_CN_MAP[rest[0]]) if rest and rest[0] in _CN_MAP else 0
         return 20 + d
-    # 卅x（30-31）
+    # 卅x（30-31）：卅 or 卅+个位
     if s[0] == '卅':
         rest = s[1:]
         d = int(_CN_MAP[rest[0]]) if rest and rest[0] in _CN_MAP else 0
         return 30 + d
-    # 十x（10-19）
+    # 十x（10-19）：十 or 十+个位
     if s[0] == '十':
         rest = s[1:]
         d = int(_CN_MAP[rest[0]]) if rest and rest[0] in _CN_MAP else 0
         return 10 + d
-    # 二十x（20-29）
+    # 二十/三十… + 可选个位（必须先判断 len>=2 且第二位是'十'，否则"二"会被单字符匹配）
     if len(s) >= 2 and s[1] == '十':
         tens = int(_CN_MAP.get(s[0], '0')) * 10
         rest = s[2:]
+        # 整十（如"二十"）：rest 为空，个位为 0
         d = int(_CN_MAP[rest[0]]) if rest and rest[0] in _CN_MAP else 0
         return tens + d
-    # 三十x（30-31）
-    if len(s) >= 2 and s[0] in _CN_MAP and s[1] == '十':
-        tens = int(_CN_MAP[s[0]]) * 10
-        rest = s[2:]
-        d = int(_CN_MAP[rest[0]]) if rest and rest[0] in _CN_MAP else 0
-        return tens + d
-    # 单个中文数字
+    # 单个中文数字（1-9）
     if s[0] in _CN_MAP:
         return int(_CN_MAP[s[0]])
     if s.isdigit():
