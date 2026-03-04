@@ -24,7 +24,14 @@
       "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python /Users/songyangyang/Desktop/education_audit/debug_full_pipeline.py)",
       "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python /Users/songyangyang/Desktop/education_audit/debug_hdbscan_methods.py)",
       "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python /Users/songyangyang/Desktop/education_audit/app/cluster_images_dinov2.py --image_dir /Users/songyangyang/Desktop/education_audit/pic --output_dir /tmp/test_cluster_leaf)",
-      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python /Users/songyangyang/Desktop/education_audit/debug_merge_distances.py)"
+      "Bash(/opt/homebrew/anaconda3/envs/open_manus/bin/python /Users/songyangyang/Desktop/education_audit/debug_merge_distances.py)",
+      "Bash(chmod +x:*)",
+      "Bash(mysql:*)",
+      "Bash(MYSQL_HOST=127.0.0.1 MYSQL_USER=root MYSQL_PASSWORD=123456 python:*)",
+      "Bash(pip install:*)",
+      "Bash(python -c \":*)",
+      "Bash(wc:*)",
+      "Bash(python:*)"
     ]
   }
 }

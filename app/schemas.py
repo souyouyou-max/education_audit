@@ -93,3 +93,74 @@ class ErrorResponse(BaseModel):
     error: str
     detail: Optional[str] = None
 
+
+# ── 欺诈检测相关模型 ──────────────────────────────────────────────
+
+class FaceInfo(BaseModel):
+    """人脸属性信息"""
+    age: Optional[int] = None
+    gender: Optional[str] = None   # '男' / '女'
+    det_score: Optional[float] = None
+    bbox: Optional[List[float]] = None
+
+
+class FraudIssue(BaseModel):
+    """单条欺诈/风险问题"""
+    rule: str                        # 规则名称
+    detail: str                      # 详细描述
+    severity: str                    # '高' / '中' / '低'
+    related_ids: List[str] = []      # 关联的证件ID
+
+
+class OcrFields(BaseModel):
+    """OCR提取的结构化字段"""
+    school: Optional[str] = None
+    principal: Optional[str] = None
+    grad_year: Optional[str] = None
+    enrollment_year: Optional[str] = None
+    issue_year: Optional[str] = None
+    cert_no: Optional[str] = None
+    gender: Optional[str] = None
+    birth_year: Optional[str] = None
+
+
+class AnalyzeResponse(BaseModel):
+    """单张证件全面分析响应"""
+    entity_id: int
+    filename: Optional[str] = None
+    ocr_fields: Optional[OcrFields] = None
+    face_info: Optional[FaceInfo] = None
+    forensic: Optional[Dict[str, Any]] = None   # ELA / 照片边缘 / 印章
+    rule_issues: List[FraudIssue] = []
+    risk_level: str = "低"           # '高' / '中' / '低'
+    risk_flags: List[str] = []
+
+
+class CrossValidateResponse(BaseModel):
+    """批量交叉核验响应"""
+    total_certs: int                  # 参与核验的证件总数
+    ocr_success: int                  # OCR成功数
+    issues: List[FraudIssue] = []    # 所有发现的问题
+    issue_count: int = 0
+    high_severity_count: int = 0
+    message: Optional[str] = None
+
+
+# ── OCR 清单 ──────────────────────────────────────────────────────
+
+class OcrListItem(BaseModel):
+    """OCR 清单中单条证件"""
+    id: str                                   # 字符串 id，防止 JS 大整数精度丢失
+    filename: Optional[str] = None
+    ocr_done: bool = False                    # 是否已运行过 OCR
+    fields: Optional[Dict[str, Any]] = None  # 结构化字段（不含 _raw_text）
+    raw_text: Optional[str] = None           # OCR 原始识别文本
+    ps_data: Optional[Dict[str, Any]] = None # PS 鉴别结果（若已检测）
+
+
+class OcrListResponse(BaseModel):
+    """OCR 清单响应"""
+    items: List[OcrListItem]
+    total: int
+    ocr_done_count: int
+

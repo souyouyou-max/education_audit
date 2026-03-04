@@ -267,6 +267,36 @@ class VectorService:
                          exc_info=True)
             return None
     
+    def get_face_attributes(self, image: Image.Image) -> Optional[dict]:
+        """
+        获取人脸属性（年龄、性别、bbox）供规则引擎使用
+        返回 {"age": int, "gender": str, "bbox": list, "det_score": float}
+        未检测到人脸时返回 None
+        """
+        self._ensure_models_loaded()
+        try:
+            img_array = np.array(image.convert("RGB"))
+            faces = self.face_app.get(img_array)
+            if not faces:
+                return None
+            best = max(faces, key=lambda f: f.det_score)
+            gender_raw = getattr(best, "sex", None)
+            if isinstance(gender_raw, (int, float)):
+                gender = "男" if gender_raw >= 0.5 else "女"
+            elif isinstance(gender_raw, str):
+                gender = "男" if gender_raw.upper() in ("M", "MALE") else "女"
+            else:
+                gender = None
+            return {
+                "age": int(best.age) if hasattr(best, "age") and best.age is not None else None,
+                "gender": gender,
+                "bbox": best.bbox.tolist(),
+                "det_score": float(best.det_score),
+            }
+        except Exception as e:
+            logger.warning("get_face_attributes failed: %s", e)
+            return None
+
     def extract_all_vectors(self, image: Image.Image) -> Tuple[List[float], List[float], List[float]]:
         """提取所有向量，失败字段返回零向量（Milvus 不接受 None）"""
         image_vec = None

@@ -13,7 +13,7 @@ import torch
 from PIL import Image
 from app.config import settings
 from app.milvus_client import milvus_client
-from app.id_filename_store import get_filenames_for_ids
+from app.utils import get_filenames_for_ids
 from app.utils import get_image_path_by_id
 
 logger = logging.getLogger(__name__)

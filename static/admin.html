@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>运营管理 — 学历证件稽核系统</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #1a1b26;
+      color: #c0caf5;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      position: sticky;
+      top: 0;
+      background: #16161e;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      height: 52px;
+      z-index: 100;
+      border-bottom: 1px solid #363b54;
+    }
+    .header h1 { font-size: 1rem; font-weight: 600; margin: 0; }
+    .header-nav { display: flex; gap: 8px; }
+    .nav-link {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      color: #565f89;
+      text-decoration: none;
+      border: 1px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .nav-link:hover { color: #c0caf5; border-color: #414868; }
+
+    /* ── Status bar ── */
+    .status-bar {
+      background: #16161e;
+      border-bottom: 1px solid #363b54;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .status-label { font-size: 0.75rem; color: #565f89; }
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+    }
+    .dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot-green  { background: #9ece6a; }
+    .dot-red    { background: #f7768e; }
+    .dot-grey   { background: #414868; }
+    .status-val { font-weight: 600; }
+    .status-sep { color: #363b54; }
+    .btn-refresh-status {
+      background: none;
+      border: 1px solid #414868;
+      color: #565f89;
+      border-radius: 5px;
+      padding: 3px 10px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      margin-left: auto;
+    }
+    .btn-refresh-status:hover { color: #c0caf5; border-color: #7aa2f7; }
+
+    /* ── Main content ── */
+    .main { padding: 20px; max-width: 1100px; }
+
+    /* ── Card grid ── */
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .card {
+      background: #24283b;
+      border: 1px solid #363b54;
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .card-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin: 0 0 4px;
+    }
+    .card-desc {
+      font-size: 0.78rem;
+      color: #565f89;
+      margin: 0 0 14px;
+      line-height: 1.5;
+    }
+
+    /* ── Form controls ── */
+    .form-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+    }
+    .form-label {
+      font-size: 0.78rem;
+      color: #a9b1d6;
+      white-space: nowrap;
+    }
+    input[type="text"], input[type="number"], select {
+      background: #1a1b26;
+      color: #c0caf5;
+      border: 1px solid #414868;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.82rem;
+      outline: none;
+    }
+    input[type="text"] { width: 100%; }
+    input[type="text"]:focus, input[type="number"]:focus, select:focus {
+      border-color: #7aa2f7;
+    }
+    input[type="number"] { width: 80px; }
+    select { min-width: 120px; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 16px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: background 0.15s, opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary  { background: #7aa2f7; color: #1a1b26; }
+    .btn-primary:hover:not(:disabled)  { background: #6690e0; }
+    .btn-green    { background: #9ece6a; color: #1a1b26; }
+    .btn-green:hover:not(:disabled)    { background: #8ab85e; }
+    .btn-purple   { background: #bb9af7; color: #1a1b26; }
+    .btn-purple:hover:not(:disabled)   { background: #a685e0; }
+    .btn-orange   { background: #e0af68; color: #1a1b26; }
+    .btn-orange:hover:not(:disabled)   { background: #c99a54; }
+
+    /* Progress bar */
+    .progress-wrap {
+      display: none;
+      margin-top: 12px;
+    }
+    .progress-track {
+      background: #1a1b26;
+      border-radius: 4px;
+      height: 6px;
+      overflow: hidden;
+      margin-bottom: 6px;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #7aa2f7;
+      border-radius: 4px;
+      width: 0%;
+      transition: width 0.3s;
+    }
+    .progress-text {
+      font-size: 0.75rem;
+      color: #565f89;
+    }
+
+    /* Mini result badge row */
+    .result-row {
+      display: none;
+      margin-top: 10px;
+      font-size: 0.8rem;
+      color: #a9b1d6;
+    }
+
+    /* ── Log console ── */
+    .log-section { margin-top: 4px; }
+    .log-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .log-title {
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #7aa2f7;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .btn-clear-log {
+      background: none;
+      border: 1px solid #363b54;
+      color: #565f89;
+      border-radius: 5px;
+      padding: 3px 10px;
+      font-size: 0.72rem;
+      cursor: pointer;
+    }
+    .btn-clear-log:hover { color: #c0caf5; border-color: #414868; }
+    #logConsole {
+      background: #16161e;
+      border: 1px solid #363b54;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 0.78rem;
+      font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      color: #a9b1d6;
+      height: 280px;
+      overflow-y: auto;
+      line-height: 1.6;
+      resize: vertical;
+    }
+    #logConsole::-webkit-scrollbar { width: 5px; }
+    #logConsole::-webkit-scrollbar-track { background: #1e2030; border-radius: 3px; }
+    #logConsole::-webkit-scrollbar-thumb { background: #414868; border-radius: 3px; }
+    .log-line { display: block; }
+    .log-line.ok     { color: #9ece6a; }
+    .log-line.err    { color: #f7768e; }
+    .log-line.warn   { color: #e0af68; }
+    .log-line.info   { color: #7aa2f7; }
+    .log-line.dim    { color: #565f89; }
+  </style>
+</head>
+<body>
+
+<header class="header">
+  <h1>运营管理面板</h1>
+  <nav class="header-nav">
+    <a class="nav-link" href="/view">分组查看</a>
+    <a class="nav-link" href="/ocr">OCR 清单</a>
+    <a class="nav-link" href="/docs">API 文档</a>
+  </nav>
+</header>
+
+<!-- 系统状态栏 -->
+<div class="status-bar" id="statusBar">
+  <span class="status-label">系统状态</span>
+  <span class="status-item" id="stMilvus">
+    <span class="dot dot-grey"></span>
+    <span>Milvus —</span>
+  </span>
+  <span class="status-sep">|</span>
+  <span class="status-item" id="stMySQL">
+    <span class="dot dot-grey"></span>
+    <span>MySQL —</span>
+  </span>
+  <span class="status-sep">|</span>
+  <span class="status-item" id="stCerts">
+    <span>已上传证件 —</span>
+  </span>
+  <button class="btn-refresh-status" onclick="loadStatus()">刷新</button>
+</div>
+
+<div class="main">
+  <div class="card-grid">
+
+    <!-- 卡片1：批量导入目录 -->
+    <div class="card">
+      <div class="card-title">批量导入目录</div>
+      <div class="card-desc">输入服务器上的图片目录路径，将目录内所有图片批量导入系统。</div>
+      <div class="form-row">
+        <span class="form-label">目录路径</span>
+      </div>
+      <div class="form-row">
+        <input type="text" id="importDir" placeholder="/data/certs/2024" />
+      </div>
+      <div class="form-row">
+        <button class="btn btn-primary" id="btnImport" onclick="runImport()">开始导入</button>
+      </div>
+      <div class="result-row" id="importResult"></div>
+    </div>
+
+    <!-- 卡片2：重新聚类 -->
+    <div class="card">
+      <div class="card-title">重新聚类</div>
+      <div class="card-desc">对所有已上传证件重新执行聚类分析，可调整向量字段与聚类参数。</div>
+      <div class="form-row">
+        <span class="form-label">向量字段</span>
+        <select id="clusterField">
+          <option value="template_vector">模板向量</option>
+          <option value="image_vector">图像向量</option>
+          <option value="face_vector">人脸向量</option>
+        </select>
+        <span class="form-label" style="margin-left:8px;">eps</span>
+        <input type="number" id="clusterEps" value="" placeholder="默认" step="0.005" min="0.01" max="0.5" />
+      </div>
+      <div class="form-row">
+        <button class="btn btn-green" id="btnCluster" onclick="runCluster()">执行聚类</button>
+      </div>
+      <div class="result-row" id="clusterResult"></div>
+    </div>
+
+    <!-- 卡片3：批量OCR + 取证 -->
+    <div class="card">
+      <div class="card-title">批量 OCR + 图像取证</div>
+      <div class="card-desc">对所有已上传证件批量执行 OCR 字段提取、图像取证与规则校验，实时推送进度。</div>
+      <div class="form-row">
+        <button class="btn btn-purple" id="btnBatchAnalyze" onclick="runBatchAnalyze()">开始批量分析</button>
+      </div>
+      <div class="progress-wrap" id="analyzeProgress">
+        <div class="progress-track">
+          <div class="progress-fill" id="analyzeFill"></div>
+        </div>
+        <div class="progress-text" id="analyzeProgressText">0 / 0</div>
+      </div>
+      <div class="result-row" id="analyzeResult"></div>
+    </div>
+
+    <!-- 卡片4：交叉核验 -->
+    <div class="card">
+      <div class="card-title">交叉核验</div>
+      <div class="card-desc">对所有证件执行跨证件规则校验：校长一致性、证书编号重复、任期逻辑等。</div>
+      <div class="form-row">
+        <label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;color:#a9b1d6;cursor:pointer;">
+          <input type="checkbox" id="chkPhash" />
+          同时检测区域图像雷同（感知哈希，较慢）
+        </label>
+      </div>
+      <div class="form-row">
+        <button class="btn btn-orange" id="btnCrossValidate" onclick="runCrossValidate()">执行交叉核验</button>
+      </div>
+      <div class="result-row" id="crossResult"></div>
+    </div>
+
+  </div><!-- /card-grid -->
+
+  <!-- 实时日志控制台 -->
+  <div class="log-section">
+    <div class="log-header">
+      <span class="log-title">实时操作日志</span>
+      <button class="btn-clear-log" onclick="clearLog()">清空</button>
+    </div>
+    <div id="logConsole"></div>
+  </div>
+
+</div><!-- /main -->
+
+<script>
+  const API = '';
+
+  // ── 日志工具 ───────────────────────────────────────────────────
+  function log(msg, type = '') {
+    const el = document.getElementById('logConsole');
+    const line = document.createElement('span');
+    line.className = 'log-line' + (type ? ' ' + type : '');
+    const now = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+    line.textContent = '[' + now + '] ' + msg;
+    el.appendChild(line);
+    el.appendChild(document.createElement('br'));
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function clearLog() {
+    document.getElementById('logConsole').innerHTML = '';
+  }
+
+  function setResult(id, html) {
+    const el = document.getElementById(id);
+    el.style.display = 'block';
+    el.innerHTML = html;
+  }
+
+  // ── 系统状态 ───────────────────────────────────────────────────
+  async function loadStatus() {
+    try {
+      const res = await fetch(API + '/health');
+      const data = await res.json();
+      const ok = data.status === 'healthy';
+
+      document.getElementById('stMilvus').innerHTML =
+        '<span class="dot ' + (ok ? 'dot-green' : 'dot-red') + '"></span>' +
+        '<span>Milvus <span class="status-val">' + (ok ? '正常' : '异常') + '</span></span>';
+
+      const mysqlOk = data.mysql !== 'unavailable' && data.mysql !== undefined;
+      document.getElementById('stMySQL').innerHTML =
+        '<span class="dot ' + (data.mysql === 'connected' ? 'dot-green' : data.mysql === 'unavailable' ? 'dot-grey' : 'dot-red') + '"></span>' +
+        '<span>MySQL <span class="status-val">' + (data.mysql || '未知') + '</span></span>';
+
+      const total = data.image_count ?? data.total_items ?? '—';
+      document.getElementById('stCerts').innerHTML =
+        '已上传证件 <span class="status-val">' + total + '</span> 张';
+    } catch (e) {
+      document.getElementById('stMilvus').innerHTML =
+        '<span class="dot dot-red"></span><span>连接失败: ' + escHtml(String(e)) + '</span>';
+    }
+  }
+
+  // ── 批量导入目录 ───────────────────────────────────────────────
+  async function runImport() {
+    const dir = document.getElementById('importDir').value.trim();
+    if (!dir) { log('请填写目录路径', 'warn'); return; }
+    const btn = document.getElementById('btnImport');
+    btn.disabled = true;
+    log('开始导入目录: ' + dir, 'info');
+
+    try {
+      const res = await fetch(API + '/upload_dir?directory=' + encodeURIComponent(dir), { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || '请求失败 ' + res.status);
+      log('导入完成：' + data.message, data.fail_count > 0 ? 'warn' : 'ok');
+      data.items?.forEach(item => {
+        if (!item.success) log('  ✗ ' + item.filename + ': ' + item.error, 'err');
+      });
+      setResult('importResult', '✓ ' + data.message);
+      loadStatus();
+    } catch (e) {
+      log('导入失败: ' + e.message, 'err');
+      setResult('importResult', '<span style="color:#f7768e">✗ ' + escHtml(e.message) + '</span>');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ── 重新聚类 ───────────────────────────────────────────────────
+  async function runCluster() {
+    const field = document.getElementById('clusterField').value;
+    const epsVal = document.getElementById('clusterEps').value.trim();
+    const btn = document.getElementById('btnCluster');
+    btn.disabled = true;
+    log('开始聚类：' + field + (epsVal ? '，eps=' + epsVal : '，eps=默认'), 'info');
+
+    try {
+      let url = API + '/cluster?vector_field=' + encodeURIComponent(field);
+      if (epsVal) url += '&eps=' + encodeURIComponent(epsVal);
+      const res = await fetch(url);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || '请求失败 ' + res.status);
+
+      const groups = (data.groups || []).filter(g => !(typeof g.group_id === 'string' && g.group_id.startsWith('noise_')));
+      const abnormal = data.abnormal_groups?.length || 0;
+      const msg = `聚类完成：${groups.length} 组，${data.total_items} 张，${abnormal} 个异常组`;
+      log(msg, 'ok');
+      if (data.params_used) {
+        const p = data.params_used;
+        log('  参数：eps=' + (p.eps ?? '—') + '，min_samples=' + (p.min_samples ?? '—'), 'dim');
+      }
+      setResult('clusterResult', '✓ ' + msg);
+    } catch (e) {
+      log('聚类失败: ' + e.message, 'err');
+      setResult('clusterResult', '<span style="color:#f7768e">✗ ' + escHtml(e.message) + '</span>');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // ── 批量OCR + 取证 (SSE) ──────────────────────────────────────
+  let analyzeAbort = null;
+
+  function runBatchAnalyze() {
+    const btn = document.getElementById('btnBatchAnalyze');
+    if (analyzeAbort) {
+      analyzeAbort.abort();
+      analyzeAbort = null;
+      btn.textContent = '开始批量分析';
+      btn.disabled = false;
+      log('已中止批量分析', 'warn');
+      return;
+    }
+
+    btn.textContent = '停止';
+    btn.disabled = false;
+    log('开始批量 OCR + 取证分析…', 'info');
+
+    const progressWrap = document.getElementById('analyzeProgress');
+    const fill = document.getElementById('analyzeFill');
+    const progressText = document.getElementById('analyzeProgressText');
+    progressWrap.style.display = 'block';
+    fill.style.width = '0%';
+    progressText.textContent = '0 / ?';
+
+    let okCount = 0, errCount = 0;
+
+    const ctrl = new AbortController();
+    analyzeAbort = ctrl;
+
+    fetch(API + '/batch_analyze', { method: 'POST', signal: ctrl.signal })
+      .then(res => {
+        if (!res.ok) return res.json().then(b => { throw new Error(b.detail || '请求失败 ' + res.status); });
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+
+        function pump() {
+          return reader.read().then(({ done, value }) => {
+            if (done) return;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            lines.forEach(line => {
+              if (!line.startsWith('data: ')) return;
+              try {
+                const ev = JSON.parse(line.slice(6));
+                const pct = ev.total > 0 ? Math.round(ev.done / ev.total * 100) : 0;
+                fill.style.width = pct + '%';
+                progressText.textContent = ev.done + ' / ' + ev.total;
+
+                if (ev.status === 'start') {
+                  log('共 ' + ev.total + ' 张证件待分析', 'dim');
+                } else if (ev.status === 'ok') {
+                  okCount++;
+                  const risk = ev.risk_level || '低';
+                  const cls = risk === '高' ? 'err' : risk === '中' ? 'warn' : 'dim';
+                  log('  [' + ev.id + '] ' + (ev.filename || '') + ' → 风险：' + risk, cls);
+                } else if (ev.status === 'skip') {
+                  log('  [' + ev.id + '] 跳过（图片未找到）', 'dim');
+                } else if (ev.status === 'error') {
+                  errCount++;
+                  log('  [' + ev.id + '] 失败: ' + ev.error, 'err');
+                } else if (ev.status === 'done') {
+                  const msg = '批量分析完成：成功 ' + okCount + ' 张，失败 ' + errCount + ' 张';
+                  log(msg, errCount > 0 ? 'warn' : 'ok');
+                  setResult('analyzeResult', '✓ ' + msg);
+                  analyzeAbort = null;
+                  btn.textContent = '开始批量分析';
+                }
+              } catch (_) {}
+            });
+            return pump();
+          });
+        }
+        return pump();
+      })
+      .catch(e => {
+        if (e.name === 'AbortError') return;
+        log('批量分析出错: ' + e.message, 'err');
+        setResult('analyzeResult', '<span style="color:#f7768e">✗ ' + escHtml(e.message) + '</span>');
+      })
+      .finally(() => {
+        btn.textContent = '开始批量分析';
+        analyzeAbort = null;
+      });
+  }
+
+  // ── 交叉核验 ──────────────────────────────────────────────────
+  async function runCrossValidate() {
+    const phash = document.getElementById('chkPhash').checked;
+    const btn = document.getElementById('btnCrossValidate');
+    btn.disabled = true;
+    log('开始交叉核验' + (phash ? '（含感知哈希）' : '') + '…', 'info');
+
+    try {
+      const res = await fetch(API + '/cross_validate?run_phash=' + phash);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || '请求失败 ' + res.status);
+
+      log(data.message || '核验完成', data.high_severity_count > 0 ? 'err' : data.issue_count > 0 ? 'warn' : 'ok');
+      log('  参与证件: ' + data.total_certs + '，OCR成功: ' + data.ocr_success + '，问题数: ' + data.issue_count, 'dim');
+      if (data.issues?.length) {
+        data.issues.slice(0, 10).forEach(issue => {
+          const cls = issue.severity === '高' ? 'err' : issue.severity === '中' ? 'warn' : 'dim';
+          log('  [' + issue.severity + '] ' + issue.rule + ': ' + issue.detail, cls);
+        });
+        if (data.issues.length > 10) log('  … 更多问题请前往欺诈检测页查看', 'dim');
+      }
+      setResult('crossResult', '✓ ' + data.message);
+    } catch (e) {
+      log('交叉核验失败: ' + e.message, 'err');
+      setResult('crossResult', '<span style="color:#f7768e">✗ ' + escHtml(e.message) + '</span>');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function escHtml(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── 初始化 ────────────────────────────────────────────────────
+  loadStatus();
+  log('运营管理面板已就绪', 'info');
+</script>
+</body>
+</html>

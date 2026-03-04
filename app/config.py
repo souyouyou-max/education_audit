@@ -4,6 +4,9 @@
 import os
 from typing import Optional
 
+from dotenv import load_dotenv
+load_dotenv()
+
 class Settings:
     """应用配置"""
     
@@ -60,9 +63,34 @@ class Settings:
     
     # 文件上传配置（使用项目根下的 uploads，避免因运行目录不同导致存/取路径不一致）
     _project_root: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    UPLOAD_DIR: str = os.path.join(_project_root, "uploads")
+    UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", os.path.join(_project_root, "uploads"))
     MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB
     ALLOWED_EXTENSIONS: set = {".jpg", ".jpeg", ".png", ".bmp"}
+
+    # ZhengYan 多模态 OCR API 配置
+    ZHENGYAN_ENDPOINT_URL: str = os.getenv("ZHENGYAN_ENDPOINT_URL", "")
+    ZHENGYAN_ACCESS_TOKEN: str = os.getenv("ZHENGYAN_ACCESS_TOKEN", "")
+    ZHENGYAN_APP_ID: str = os.getenv("ZHENGYAN_APP_ID", "")
+    ZHENGYAN_MODEL_TYPE: str = os.getenv("ZHENGYAN_MODEL_TYPE", "")
+    ZHENGYAN_USER_ID: str = os.getenv("ZHENGYAN_USER_ID", "")
+    ZHENGYAN_USER_NAME: str = os.getenv("ZHENGYAN_USER_NAME", "")
+    ZHENGYAN_USER_DEPT_NAME: str = os.getenv("ZHENGYAN_USER_DEPT_NAME", "")
+    ZHENGYAN_USER_COMPANY: str = os.getenv("ZHENGYAN_USER_COMPANY", "")
+
+    # MySQL 配置
+    MYSQL_HOST: str = os.getenv("MYSQL_HOST", "localhost")
+    MYSQL_PORT: int = int(os.getenv("MYSQL_PORT", "3306"))
+    MYSQL_USER: str = os.getenv("MYSQL_USER", "root")
+    MYSQL_PASSWORD: str = os.getenv("MYSQL_PASSWORD", "123456")
+    MYSQL_DATABASE: str = os.getenv("MYSQL_DATABASE", "education_audit")
+
+    @property
+    def MYSQL_URL(self) -> str:
+        return (
+            f"mysql+pymysql://{self.MYSQL_USER}:{self.MYSQL_PASSWORD}"
+            f"@{self.MYSQL_HOST}:{self.MYSQL_PORT}/{self.MYSQL_DATABASE}"
+            f"?charset=utf8mb4"
+        )
 
 settings = Settings()
 

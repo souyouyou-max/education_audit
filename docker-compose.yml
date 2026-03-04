@@ -1,6 +1,36 @@
 version: '3.8'
 
 services:
+  # ── 向量数据库依赖 ─────────────────────────────────────
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: milvus-etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    networks:
+      - audit-network
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    container_name: milvus-minio
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "9001:9001"
+      - "9000:9000"
+    volumes:
+      - minio_data:/minio_data
+    command: minio server /minio_data --console-address ":9001"
+    networks:
+      - audit-network
+
   milvus:
     image: milvusdb/milvus:v2.3.4
     container_name: milvus-standalone
@@ -17,37 +47,34 @@ services:
       - etcd
       - minio
     networks:
-      - milvus-network
+      - audit-network
 
-  etcd:
-    image: quay.io/coreos/etcd:v3.5.5
-    container_name: milvus-etcd
+  # ── MySQL ──────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: education-audit-mysql
+    restart: unless-stopped
     environment:
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
-      - ETCD_SNAPSHOT_COUNT=50000
-    volumes:
-      - etcd_data:/etcd
-    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
-    networks:
-      - milvus-network
-
-  minio:
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
-    container_name: milvus-minio
-    environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: education_audit
+      MYSQL_ROOT_HOST: "%"
     ports:
-      - "9001:9001"
-      - "9000:9000"
+      - "3306:3306"
     volumes:
-      - minio_data:/minio_data
-    command: minio server /minio_data --console-address ":9001"
+      - mysql_data:/var/lib/mysql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p123456"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
-      - milvus-network
+      - audit-network
 
+  # ── 应用（开发模式：热加载）────────────────────────────
   app:
     build:
       context: .
@@ -58,20 +85,37 @@ services:
     environment:
       - MILVUS_HOST=milvus
       - MILVUS_PORT=19530
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=123456
+      - MYSQL_DATABASE=education_audit
     volumes:
       - ./uploads:/app/uploads
-      - ./models:/app/models  # 可选：挂载预下载的模型
+      - ./data:/app/data
+      - ./app:/app/app          # 挂载源码，配合 --reload 实现热加载
+      - ./static:/app/static
+    command: >
+      uvicorn app.main:app
+        --host 0.0.0.0
+        --port 8000
+        --reload
+        --reload-dir /app/app
+        --reload-dir /app/static
     depends_on:
-      - milvus
+      milvus:
+        condition: service_started
+      mysql:
+        condition: service_healthy
     networks:
-      - milvus-network
+      - audit-network
 
 volumes:
   milvus_data:
   etcd_data:
   minio_data:
+  mysql_data:
 
 networks:
-  milvus-network:
+  audit-network:
     driver: bridge
-

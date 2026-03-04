@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OCR 清单 — 学历证件稽核系统</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: #1a1b26;
+      color: #c0caf5;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    .header {
+      position: sticky;
+      top: 0;
+      background: #16161e;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      height: 52px;
+      z-index: 100;
+      border-bottom: 1px solid #363b54;
+    }
+    .header h1 { font-size: 1rem; font-weight: 600; margin: 0; }
+    .header-nav { display: flex; gap: 8px; }
+    .nav-link {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 12px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      color: #565f89;
+      text-decoration: none;
+      border: 1px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .nav-link:hover { color: #c0caf5; border-color: #414868; }
+    .nav-link.active { color: #7aa2f7; border-color: #3d59a1; }
+
+    /* ── Toolbar ── */
+    .toolbar {
+      background: #16161e;
+      border-bottom: 1px solid #363b54;
+      padding: 10px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .toolbar-stats {
+      font-size: 0.82rem;
+      color: #a9b1d6;
+    }
+    .toolbar-stats b { color: #c0caf5; }
+    .toolbar-sep { color: #363b54; }
+    .toolbar-right {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    select, input[type="text"] {
+      background: #1a1b26;
+      color: #c0caf5;
+      border: 1px solid #414868;
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 0.82rem;
+      outline: none;
+    }
+    select:focus, input[type="text"]:focus { border-color: #7aa2f7; }
+    input[type="text"] { width: 200px; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      border: none;
+      transition: background 0.15s, opacity 0.15s;
+      white-space: nowrap;
+    }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+    .btn-primary  { background: #7aa2f7; color: #1a1b26; }
+    .btn-primary:hover:not(:disabled)  { background: #6690e0; }
+    .btn-green    { background: #9ece6a; color: #1a1b26; }
+    .btn-green:hover:not(:disabled)    { background: #8ab85e; }
+    .btn-ghost {
+      background: none;
+      border: 1px solid #414868;
+      color: #a9b1d6;
+    }
+    .btn-ghost:hover:not(:disabled) { border-color: #7aa2f7; color: #c0caf5; }
+
+    /* ── Progress bar ── */
+    .batch-progress {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      color: #565f89;
+    }
+    .batch-progress.visible { display: flex; }
+    .progress-track {
+      width: 120px;
+      height: 5px;
+      background: #363b54;
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #7aa2f7;
+      border-radius: 3px;
+      width: 0%;
+      transition: width 0.25s;
+    }
+
+    /* ── Main list ── */
+    .main { padding: 16px 20px; }
+
+    .cert-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* ── Cert card ── */
+    .cert-card {
+      background: #24283b;
+      border: 1px solid #363b54;
+      border-radius: 10px;
+      display: flex;
+      gap: 0;
+      overflow: hidden;
+      transition: border-color 0.15s;
+    }
+    .cert-card:hover { border-color: #414868; }
+    .cert-card.ocr-done { border-left: 3px solid #9ece6a; }
+    .cert-card.ocr-pending { border-left: 3px solid #414868; }
+
+    /* Image pane */
+    .cert-img-wrap {
+      width: 160px;
+      min-width: 160px;
+      background: #1a1b26;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      border-right: 1px solid #363b54;
+    }
+    .cert-img-wrap img {
+      max-width: 136px;
+      max-height: 180px;
+      object-fit: contain;
+      border-radius: 4px;
+      display: block;
+    }
+    .cert-img-placeholder {
+      width: 136px;
+      height: 96px;
+      background: #2f3354;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.72rem;
+      color: #414868;
+    }
+
+    /* Content pane */
+    .cert-content {
+      flex: 1;
+      padding: 14px 16px;
+      min-width: 0;
+    }
+
+    .cert-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .cert-id {
+      font-size: 0.78rem;
+      color: #565f89;
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+    }
+    .cert-filename {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: #c0caf5;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 300px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+    .badge-green  { background: #1e2d1a; color: #9ece6a; border: 1px solid #2d4a1e; }
+    .badge-grey   { background: #1e2030; color: #565f89; border: 1px solid #363b54; }
+    .badge-red    { background: #2d1a1e; color: #f7768e; border: 1px solid #4a1e2d; }
+    .badge-orange { background: #2d2010; color: #ff9e64; border: 1px solid #4a3210; }
+    .badge-blue   { background: #1a1e2d; color: #7aa2f7; border: 1px solid #1e2a4a; }
+
+    /* PS 鉴别结果块 */
+    .ps-block {
+      margin: 8px 0;
+      padding: 8px 12px;
+      border-radius: 6px;
+      border-left: 3px solid #414868;
+      background: #1a1b26;
+    }
+    .ps-block.ps-high   { border-left-color: #f7768e; background: #1e1520; }
+    .ps-block.ps-mid    { border-left-color: #ff9e64; background: #1e1a14; }
+    .ps-block.ps-low    { border-left-color: #9ece6a; background: #141e14; }
+    .ps-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .ps-summary { font-size: 0.78rem; color: #a9b1d6; margin-bottom: 4px; }
+    .ps-reasons { list-style: none; padding: 0; margin: 0; }
+    .ps-reasons li { font-size: 0.75rem; color: #787c99; padding: 1px 0; }
+    .ps-reasons li::before { content: "• "; color: #565f89; }
+
+    /* Fields grid */
+    .fields-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 6px 16px;
+      margin-bottom: 10px;
+    }
+    .field-item {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+    .field-label {
+      font-size: 0.68rem;
+      color: #565f89;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .field-value {
+      font-size: 0.82rem;
+      color: #c0caf5;
+      word-break: break-all;
+    }
+    .field-value.empty { color: #414868; }
+
+    /* Raw text toggle */
+    .raw-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.75rem;
+      color: #565f89;
+      cursor: pointer;
+      background: none;
+      border: 1px solid #363b54;
+      border-radius: 4px;
+      padding: 2px 8px;
+      margin-bottom: 6px;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .raw-toggle:hover { color: #a9b1d6; border-color: #414868; }
+    .raw-text-box {
+      display: none;
+      background: #16161e;
+      border: 1px solid #363b54;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 0.75rem;
+      font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      color: #a9b1d6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      max-height: 160px;
+      overflow-y: auto;
+      margin-bottom: 8px;
+      line-height: 1.55;
+    }
+    .raw-text-box.visible { display: block; }
+    .raw-text-box::-webkit-scrollbar { width: 4px; }
+    .raw-text-box::-webkit-scrollbar-track { background: #1a1b26; }
+    .raw-text-box::-webkit-scrollbar-thumb { background: #414868; border-radius: 2px; }
+
+    /* Card actions */
+    .cert-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 6px;
+    }
+    .ocr-status-text {
+      font-size: 0.75rem;
+      color: #565f89;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 80px 20px;
+      color: #414868;
+    }
+    .empty-state h2 { font-size: 1.1rem; margin: 0 0 8px; }
+    .empty-state p  { font-size: 0.85rem; margin: 0; }
+
+    /* ── Lightbox ── */
+    #lightbox {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.85);
+      z-index: 999;
+      align-items: center;
+      justify-content: center;
+      cursor: zoom-out;
+    }
+    #lightbox.open { display: flex; }
+    #lightboxImg {
+      max-width: 90vw;
+      max-height: 90vh;
+      object-fit: contain;
+      border-radius: 6px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+    }
+
+    /* Spinner */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #414868;
+      border-top-color: #7aa2f7;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+    }
+  </style>
+</head>
+<body>
+
+<div id="lightbox" onclick="closeLightbox()">
+  <img id="lightboxImg" onclick="event.stopPropagation()" />
+</div>
+
+<header class="header">
+  <h1>OCR 清单</h1>
+  <nav class="header-nav">
+    <a class="nav-link" href="/admin">运营管理</a>
+    <a class="nav-link" href="/view">分组查看</a>
+    <a class="nav-link active" href="/ocr">OCR 清单</a>
+    <a class="nav-link" href="/docs">API 文档</a>
+  </nav>
+</header>
+
+<!-- 工具栏 -->
+<div class="toolbar">
+  <div class="toolbar-stats" id="statsText">加载中…</div>
+  <span class="toolbar-sep">|</span>
+
+  <div class="batch-progress" id="batchProgress">
+    <div class="progress-track"><div class="progress-fill" id="batchFill"></div></div>
+    <span id="batchProgressText">0 / 0</span>
+    <span style="color:#414868;font-size:0.72rem;">首次识别需加载模型，请耐心等待</span>
+  </div>
+
+  <div class="toolbar-right">
+    <select id="filterSelect" onchange="applyFilter()">
+      <option value="all">全部证件</option>
+      <option value="done">已识别</option>
+      <option value="pending">未识别</option>
+    </select>
+    <input type="text" id="searchBox" placeholder="搜索文件名 / 学校…" oninput="applyFilter()" />
+    <button class="btn btn-primary" id="btnBatch" onclick="batchRunOcr()">批量识别未处理</button>
+    <button class="btn btn-ghost" onclick="loadList()">刷新</button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="cert-list" id="certList">
+    <div class="empty-state"><h2>加载中…</h2></div>
+  </div>
+</div>
+
+<script>
+  const FIELD_LABELS = {
+    cert_type:        '证书类型',
+    student_name:     '姓名',
+    school:           '学校',
+    department:       '院系 / 学部',
+    principal:        '校长 / 院长',
+    grad_year:        '毕业年份',
+    enrollment_year:  '入学年份',
+    issue_year:       '发证年份',
+    issue_date:       '发证日期',
+    cert_no:          '证书编号',
+    student_id_no:    '学籍号码',
+    gender:           '性别',
+    birth_year:       '出生年份',
+    supervisor:       '监制单位',
+  };
+
+  let allItems = [];     // 原始数据
+  let visibleItems = []; // 过滤后
+  let batchRunning = false;
+  let batchAbort   = false;
+
+  // ── 工具 ────────────────────────────────────────────────────
+  function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // ── 加载列表 ─────────────────────────────────────────────────
+  async function loadList() {
+    try {
+      const res = await fetch('/ocr_list');
+      if (!res.ok) throw new Error('请求失败 ' + res.status);
+      const data = await res.json();
+      allItems = data.items || [];
+      updateStats(data.total, data.ocr_done_count);
+      applyFilter();
+      // 后台自动补跑 PS：对有 OCR 但无 PS 数据的证件静默触发
+      _autoRunMissingPS();
+    } catch (e) {
+      document.getElementById('certList').innerHTML =
+        '<div class="empty-state"><h2>加载失败</h2><p>' + esc(e.message) + '</p></div>';
+    }
+  }
+
+  // 对已有 OCR 但缺少 PS 的证件，在后台逐一触发 PS 检测并刷新 badge
+  async function _autoRunMissingPS() {
+    const pending = allItems.filter(i => i.ocr_done && !i.ps_data);
+    for (const item of pending) {
+      try {
+        const res = await fetch(`/ps_detect/${item.id}`);
+        if (!res.ok) continue;
+        const ps = await res.json();
+        item.ps_data = ps;
+        // 仅刷新 badge 元素，不重建整张卡
+        const el = document.getElementById('psbadge_' + item.id);
+        if (el) el.innerHTML = psBadge(ps);
+      } catch (_) {}
+    }
+  }
+
+  function updateStats(total, done) {
+    const pending = total - done;
+    document.getElementById('statsText').innerHTML =
+      '共 <b>' + total + '</b> 张 &nbsp;·&nbsp; 已识别 <b>' + done + '</b> 张' +
+      (pending > 0 ? ' &nbsp;·&nbsp; 待识别 <b style="color:#e0af68">' + pending + '</b> 张' : '');
+  }
+
+  // ── 过滤 + 搜索 ──────────────────────────────────────────────
+  function applyFilter() {
+    const filter = document.getElementById('filterSelect').value;
+    const q = document.getElementById('searchBox').value.trim().toLowerCase();
+
+    visibleItems = allItems.filter(item => {
+      if (filter === 'done'    && !item.ocr_done) return false;
+      if (filter === 'pending' &&  item.ocr_done) return false;
+      if (q) {
+        const fn = (item.filename || '').toLowerCase();
+        const sc = (item.fields?.school || '').toLowerCase();
+        if (!fn.includes(q) && !sc.includes(q)) return false;
+      }
+      return true;
+    });
+
+    renderList();
+  }
+
+  // ── 渲染 ─────────────────────────────────────────────────────
+  function renderList() {
+    const container = document.getElementById('certList');
+    if (visibleItems.length === 0) {
+      container.innerHTML = '<div class="empty-state"><h2>暂无数据</h2><p>当前筛选条件下没有证件，或尚未上传任何证件。</p></div>';
+      return;
+    }
+    container.innerHTML = visibleItems.map(renderCard).join('');
+  }
+
+  function renderCard(item) {
+    const cardClass = item.ocr_done ? 'ocr-done' : 'ocr-pending';
+    const badge = item.ocr_done
+      ? '<span class="badge badge-green">✓ 已识别</span>'
+      : '<span class="badge badge-grey">未识别</span>';
+
+    // 图片区
+    const imgHtml = `<img src="/api/image/${esc(item.id)}" alt="${esc(item.filename)}" loading="lazy" ondblclick="openLightbox(this.src)" style="cursor:zoom-in" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'" />
+      <div class="cert-img-placeholder" style="display:none">无图片</div>`;
+
+    // 字段区
+    let fieldsHtml = '';
+    if (item.ocr_done && item.fields) {
+      fieldsHtml = '<div class="fields-grid">' +
+        Object.entries(FIELD_LABELS).map(([key, label]) => {
+          const val = item.fields?.[key];
+          return `<div class="field-item">
+            <span class="field-label">${esc(label)}</span>
+            <span class="field-value${val ? '' : ' empty'}">${val ? esc(val) : '—'}</span>
+          </div>`;
+        }).join('') +
+      '</div>';
+    } else if (!item.ocr_done) {
+      fieldsHtml = '<div style="font-size:0.8rem;color:#414868;margin-bottom:10px;">尚未进行 OCR 识别</div>';
+    }
+
+    // 原始文本
+    const rawId = 'raw_' + item.id;
+    let rawHtml = '';
+    if (item.ocr_done && item.raw_text) {
+      rawHtml = `
+        <button class="raw-toggle" onclick="toggleRaw('${esc(item.id)}')">
+          <span id="rawIcon_${esc(item.id)}">▶</span> 原始识别文本
+        </button>
+        <div class="raw-text-box" id="${rawId}">${esc(item.raw_text)}</div>`;
+    }
+
+    // 操作按钮
+    const btnId = 'btn_' + item.id;
+    const actions = item.ocr_done
+      ? `<button class="btn btn-ghost" id="${btnId}" onclick="rerunOcr('${esc(item.id)}')">重新识别</button>
+         <span class="ocr-status-text" id="status_${esc(item.id)}"></span>`
+      : `<button class="btn btn-primary" id="${btnId}" onclick="runOcr('${esc(item.id)}')">执行识别</button>
+         <span class="ocr-status-text" id="status_${esc(item.id)}"></span>`;
+
+    return `<div class="cert-card ${cardClass}" id="card_${esc(item.id)}">
+      <div class="cert-img-wrap">${imgHtml}</div>
+      <div class="cert-content">
+        <div class="cert-header">
+          <span class="cert-id">ID ${esc(item.id)}</span>
+          <span class="cert-filename">${esc(item.filename || '未知文件名')}</span>
+          ${badge}
+          <span id="psbadge_${esc(item.id)}">${item.ps_data ? psBadge(item.ps_data) : ''}</span>
+        </div>
+        ${fieldsHtml}
+        ${rawHtml}
+        <div class="cert-actions">${actions}</div>
+      </div>
+    </div>`;
+  }
+
+  // ── PS 鉴别 badge ──────────────────────────────────────────────
+  function psBadge(ps) {
+    if (!ps) return '';
+    const level = ps.risk_level || '低';
+    const map = { '高': ['badge-red','高风险'], '中': ['badge-orange','中风险'], '低': ['badge-blue','低风险'] };
+    const [cls, label] = map[level] || ['badge-grey', level];
+    // tooltip：鉴别结论 + 概率 + 建议 + 证据
+    const lines = [];
+    if (ps.overall_authenticity) lines.push(`鉴别结论：${ps.overall_authenticity}`);
+    if (ps.tampering_probability != null) lines.push(`篡改概率 ${Math.round(ps.tampering_probability)}%`);
+    if (ps.confidence != null) lines.push(`置信度 ${Math.round(ps.confidence)}%`);
+    if (ps.recommendation) lines.push(`建议：${ps.recommendation}`);
+    const ev = ps.key_evidence || [];
+    if (ev.length) {
+      lines.push('──疑点──');
+      ev.forEach(r => lines.push('• ' + r));
+    }
+    const sr = ps.suspect_regions || [];
+    if (sr.length) {
+      lines.push('──可疑区域──');
+      sr.forEach(r => lines.push(`• ${r.description || ''}：${r.reason || ''}`));
+    }
+    const tip = lines.join('\n');
+    return `<span class="badge ${cls}" title="${tip.replace(/"/g, '&quot;')}" style="cursor:default">🔍 ${label}</span>`;
+  }
+
+  function toggleRaw(id) {
+    const box  = document.getElementById('raw_' + id);
+    const icon = document.getElementById('rawIcon_' + id);
+    if (!box) return;
+    const open = box.classList.toggle('visible');
+    icon.textContent = open ? '▼' : '▶';
+  }
+
+  // ── 单条 OCR ─────────────────────────────────────────────────
+  async function runOcr(id) {
+    await _doOcr(id, false);
+  }
+
+  async function rerunOcr(id) {
+    await _doOcr(id, true);
+  }
+
+  async function _doOcr(id, rerun) {
+    const btn    = document.getElementById('btn_' + id);
+    const status = document.getElementById('status_' + id);
+    if (!btn) return;
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> 识别中…';
+    if (status) status.textContent = '';
+
+    try {
+      const url    = rerun ? `/ocr/${id}/rerun` : `/ocr/${id}`;
+      const method = rerun ? 'POST' : 'GET';
+      const res    = await fetch(url, { method });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || '请求失败 ' + res.status);
+      }
+      const data = await res.json();
+
+      // 更新本地 allItems 中对应条目
+      const item = allItems.find(i => i.id === id);
+      if (item) {
+        item.ocr_done = data.ocr_done;
+        item.fields   = data.fields;
+        item.raw_text = data.raw_text;
+      }
+
+      // OCR 完成后拉取 PS 鉴别结果（OCR 运行时已同步生成）
+      try {
+        const psRes = await fetch(`/ps_detect/${id}`);
+        if (psRes.ok) {
+          const psData = await psRes.json();
+          if (item) item.ps_data = psData;
+        }
+      } catch (_) {}
+
+      // 重新渲染这张卡片
+      const card = document.getElementById('card_' + id);
+      if (card) {
+        const tmpItem = allItems.find(i => i.id === id);
+        if (tmpItem) card.outerHTML = renderCard(tmpItem);
+      }
+
+      // 更新统计
+      const done = allItems.filter(i => i.ocr_done).length;
+      updateStats(allItems.length, done);
+
+    } catch (e) {
+      btn.disabled = false;
+      btn.innerHTML = rerun ? '重新识别' : '执行识别';
+      if (status) status.textContent = '失败: ' + e.message;
+    }
+  }
+
+  // ── 批量 OCR ─────────────────────────────────────────────────
+  async function batchRunOcr() {
+    const btn = document.getElementById('btnBatch');
+
+    // 如果正在跑，点击则停止
+    if (batchRunning) {
+      batchAbort = true;
+      btn.textContent = '正在停止…';
+      btn.disabled = true;
+      return;
+    }
+
+    const pending = allItems.filter(i => !i.ocr_done);
+    if (pending.length === 0) {
+      alert('全部证件已完成识别，无需批量处理。');
+      return;
+    }
+
+    batchRunning = true;
+    batchAbort   = false;
+    btn.textContent = '停止批量识别';
+    btn.className = 'btn btn-ghost';
+    btn.disabled = false;
+
+    const progressEl = document.getElementById('batchProgress');
+    const fillEl     = document.getElementById('batchFill');
+    const textEl     = document.getElementById('batchProgressText');
+    progressEl.classList.add('visible');
+    fillEl.style.width = '0%';
+
+    let done = 0;
+    const total = pending.length;
+
+    for (const item of pending) {
+      if (batchAbort) break;
+
+      // 先更新进度：显示"正在处理第 X 张"
+      textEl.textContent = '处理中 ' + (done + 1) + ' / ' + total + '（' + (item.filename || item.id) + '）';
+      fillEl.style.width = Math.round(done / total * 100) + '%';
+
+      // 在卡片上显示 loading 状态
+      const cardEl = document.getElementById('card_' + item.id);
+      const cardBtn = document.getElementById('btn_' + item.id);
+      if (cardBtn) {
+        cardBtn.disabled = true;
+        cardBtn.innerHTML = '<span class="spinner"></span> 识别中…';
+      }
+
+      try {
+        const res = await fetch('/ocr/' + item.id);
+        if (res.ok) {
+          const data = await res.json();
+          item.ocr_done = data.ocr_done;
+          item.fields   = data.fields;
+          item.raw_text = data.raw_text;
+          if (cardEl) cardEl.outerHTML = renderCard(item);
+        } else {
+          const body = await res.json().catch(() => ({}));
+          const errMsg = body.detail || '请求失败 ' + res.status;
+          // 在卡片状态处显示错误
+          const statusEl = document.getElementById('status_' + item.id);
+          if (statusEl) statusEl.textContent = '失败: ' + errMsg;
+          const retryBtn = document.getElementById('btn_' + item.id);
+          if (retryBtn) { retryBtn.disabled = false; retryBtn.textContent = '执行识别'; }
+        }
+      } catch (e) {
+        const statusEl = document.getElementById('status_' + item.id);
+        if (statusEl) statusEl.textContent = '失败: ' + e.message;
+        const retryBtn = document.getElementById('btn_' + item.id);
+        if (retryBtn) { retryBtn.disabled = false; retryBtn.textContent = '执行识别'; }
+      }
+
+      done++;
+    }
+
+    fillEl.style.width = '100%';
+    textEl.textContent = batchAbort
+      ? ('已停止，完成 ' + done + ' / ' + total)
+      : ('全部完成 ' + done + ' / ' + total);
+
+    batchRunning = false;
+    batchAbort   = false;
+    btn.disabled = false;
+    btn.textContent = '批量识别未处理';
+    btn.className = 'btn btn-primary';
+
+    const doneCount = allItems.filter(i => i.ocr_done).length;
+    updateStats(allItems.length, doneCount);
+
+    setTimeout(() => { progressEl.classList.remove('visible'); fillEl.style.width = '0%'; }, 3000);
+  }
+
+  // ── Lightbox ─────────────────────────────────────────────────
+  function openLightbox(src) {
+    document.getElementById('lightboxImg').src = src;
+    document.getElementById('lightbox').classList.add('open');
+  }
+  function closeLightbox() {
+    document.getElementById('lightbox').classList.remove('open');
+  }
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+  // ── 启动 ─────────────────────────────────────────────────────
+  loadList();
+</script>
+</body>
+</html>
