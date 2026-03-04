@@ -9,6 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import settings
 from app.milvus_client import milvus_client
@@ -31,9 +32,14 @@ async def lifespan(app: FastAPI):
 
     # 初始化 MySQL（失败不阻断启动，降级为无DB模式）
     try:
-        from app.database import init_db
+        from app.database import init_db, _engine
         init_db()
         logger.info("MySQL initialized successfully")
+        # 挂载 SQLAdmin（依赖 engine，必须在 init_db 之后）
+        from app.database import _engine as db_engine
+        from app.admin import setup_admin
+        setup_admin(app, db_engine)
+        logger.info("SQLAdmin mounted at /admin")
     except Exception as e:
         logger.warning("MySQL init failed (running without DB): %s", e)
 
@@ -65,6 +71,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.SECRET_KEY,
+    session_cookie="admin_session",
+    max_age=3600 * 8,   # 8小时免重新登录
 )
 
 

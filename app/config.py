@@ -84,6 +84,11 @@ class Settings:
     MYSQL_PASSWORD: str = os.getenv("MYSQL_PASSWORD", "123456")
     MYSQL_DATABASE: str = os.getenv("MYSQL_DATABASE", "education_audit")
 
+    # Admin 后台配置
+    ADMIN_USERNAME: str = os.getenv("ADMIN_USERNAME", "admin")
+    ADMIN_PASSWORD: str = os.getenv("ADMIN_PASSWORD", "admin123")
+    SECRET_KEY: str = os.getenv("SECRET_KEY", "education-audit-secret-key-change-in-production")
+
     @property
     def MYSQL_URL(self) -> str:
         return (

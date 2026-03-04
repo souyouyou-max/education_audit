@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from app.cluster_service import cluster_service
 from app.config import settings
-from app.database import save_certificate
+from app.database import is_db_available, save_certificate
 from app.milvus_client import milvus_client
 from app.schemas import (
     BatchUploadItem,
@@ -23,6 +23,7 @@ from app.utils import (
     get_image_path_by_id,
     load_image_from_bytes,
     save_image_by_id,
+    scan_upload_ids,
     validate_image_file,
 )
 from app.vector_service import vector_service
@@ -57,6 +58,15 @@ async def view_groups_page():
     return FileResponse(str(path))
 
 
+@router.get("/search", response_class=FileResponse)
+async def search_page():
+    """图片相似搜索 Web 页面"""
+    path = _STATIC_DIR / "search.html"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="search.html not found")
+    return FileResponse(str(path))
+
+
 @router.get("/api/image/{entity_id}", response_class=FileResponse)
 async def get_image_by_id(entity_id: int):
     """根据实体 id 返回已保存的图片。用于分组查看页展示。"""
@@ -76,7 +86,14 @@ async def health_check():
     """健康检查"""
     try:
         stats = milvus_client.get_collection_stats()
-        return {"status": "healthy", "milvus": "connected", **stats}
+        mysql_status = "connected" if is_db_available() else "unavailable"
+        return {
+            "status": "healthy",
+            "milvus": "connected",
+            "mysql": mysql_status,
+            "image_count": len(scan_upload_ids()),
+            **stats,
+        }
     except Exception as e:
         return JSONResponse(status_code=503, content={"status": "unhealthy", "error": str(e)})
 

@@ -37,6 +37,9 @@ sqlalchemy>=2.0.0
 pymysql>=1.1.0
 cryptography>=42.0.0   # PyMySQL caching_sha2_password 认证需要
 
+# Admin 后台
+sqladmin>=0.18.0
+
 # 工具
 python-dotenv>=1.0.0
 certifi>=2024.0.0
