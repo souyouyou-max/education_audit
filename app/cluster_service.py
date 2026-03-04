@@ -16,6 +16,123 @@ from app.config import settings
 from app.milvus_client import milvus_client
 from app.utils import get_filenames_for_ids, get_image_path_by_id
 
+
+def estimate_optimal_eps(vectors: np.ndarray, k: int = 4, metric: str = "cosine") -> float:
+    """
+    使用 k-距离图估计最佳 DBSCAN eps。
+    
+    原理：计算每个点到其第 k 近邻的距离，排序后寻找"拐点"(elbow/knee)。
+    拐点之前的距离变化平缓（噪声区），之后急剧上升（簇边界）。
+    
+    Args:
+        vectors: 向量矩阵 (n_samples, n_features)
+        k: 近邻数（通常取 min_samples 或 min_samples-1）
+        metric: 距离度量
+    
+    Returns:
+        估计的最佳 eps 值
+    """
+    from sklearn.neighbors import NearestNeighbors
+    
+    if len(vectors) <= k:
+        return settings.DBSCAN_EPS  # 数据太少，返回默认值
+    
+    neigh = NearestNeighbors(n_neighbors=k+1, metric=metric)  # +1 因为包含自己
+    neigh.fit(vectors)
+    distances, _ = neigh.kneighbors(vectors)
+    
+    # 取第 k 近邻的距离（第 0 列是自己，距离为 0）
+    k_distances = np.sort(distances[:, k])
+    
+    # 使用 Kneedle 算法找拐点
+    # 简化版：计算相邻点斜率变化最大的位置
+    diffs = np.diff(k_distances)
+    if len(diffs) < 2:
+        return settings.DBSCAN_EPS
+    
+    # 找二阶差分最大的点（曲率最大）
+    second_diffs = np.diff(diffs)
+    knee_idx = np.argmax(second_diffs) + 1  # +1 因为二阶差分比原数组少2个元素
+    
+    # 边界检查，确保 knee 在合理范围内
+    if knee_idx < 1 or knee_idx >= len(k_distances):
+        knee_idx = len(k_distances) // 4  # 保守估计：取 25% 位置
+    
+    estimated_eps = float(k_distances[knee_idx])
+    
+    # 限制在合理范围内
+    return max(0.03, min(0.15, estimated_eps))
+
+
+def compute_clustering_debug_info(vectors: np.ndarray, metric: str = "cosine") -> Dict[str, Any]:
+    """
+    计算聚类调试信息，帮助用户理解数据分布并调参。
+    
+    Returns:
+        {
+            "k_distance_curve": [...],  # k-距离曲线，用于画折线图
+            "eps_candidates": [...],    # 不同 eps 对应的簇数量
+            "distance_histogram": {...}, # 距离分布直方图
+            "suggested_eps": float,     # 建议的 eps 值
+        }
+    """
+    from sklearn.neighbors import NearestNeighbors
+    from collections import Counter
+    
+    n = len(vectors)
+    if n <= 2:
+        return {"error": "Too few samples for clustering debug"}
+    
+    # 1. 计算 k-距离曲线
+    k = min(4, n-1)
+    neigh = NearestNeighbors(n_neighbors=k+1, metric=metric)
+    neigh.fit(vectors)
+    distances, _ = neigh.kneighbors(vectors)
+    k_distances = np.sort(distances[:, k]).tolist()
+    
+    # 2. 计算距离直方图
+    pd = pairwise_distances(vectors, metric=metric)
+    # 只取上三角（排除对角线）
+    triu_indices = np.triu_indices(n, k=1)
+    all_distances = pd[triu_indices]
+    
+    hist, bin_edges = np.histogram(all_distances, bins=20)
+    distance_histogram = {
+        "bins": bin_edges.tolist(),
+        "counts": hist.tolist(),
+    }
+    
+    # 3. 不同 eps 下的聚类数量
+    eps_candidates = []
+    for eps in np.linspace(0.03, 0.15, 13):  # 0.03 到 0.15，步长 0.01
+        labels = DBSCAN(eps=eps, min_samples=2, metric=metric).fit_predict(vectors)
+        n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+        n_noise = list(labels).count(-1)
+        eps_candidates.append({
+            "eps": round(eps, 3),
+            "n_clusters": n_clusters,
+            "n_noise": n_noise,
+        })
+    
+    # 4. 建议 eps
+    suggested_eps = estimate_optimal_eps(vectors, k=k, metric=metric)
+    
+    return {
+        "k_distance_curve": k_distances,
+        "eps_candidates": eps_candidates,
+        "distance_histogram": distance_histogram,
+        "suggested_eps": round(suggested_eps, 4),
+        "sample_count": n,
+    }
+
+
+# 添加 pairwise_distances 导入
+from sklearn.metrics.pairwise import pairwise_distances
+
+from app.config import settings
+from app.milvus_client import milvus_client
+from app.utils import get_filenames_for_ids, get_image_path_by_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,8 +172,16 @@ class ClusterService:
         ids = list(vectors_dict.keys())
         vectors = np.array([vectors_dict[id_] for id_ in ids])
 
+        # 自适应 eps：如果数据量足够，自动估计最佳 eps
+        use_adaptive_eps = len(vectors) >= 10
+        if use_adaptive_eps:
+            optimal_eps = estimate_optimal_eps(vectors, k=settings.DBSCAN_MIN_SAMPLES, metric="cosine")
+            logger.info("Adaptive eps estimation: %.4f (default was %.4f)", optimal_eps, settings.DBSCAN_EPS)
+        else:
+            optimal_eps = settings.DBSCAN_EPS
+        
         labels = DBSCAN(
-            eps=settings.DBSCAN_EPS,
+            eps=optimal_eps,
             min_samples=settings.DBSCAN_MIN_SAMPLES,
             metric="cosine",
         ).fit_predict(vectors)

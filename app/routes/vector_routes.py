@@ -348,6 +348,52 @@ async def search_by_image(
     return SearchResponse(query_id=None, results=formatted_results, total=len(formatted_results))
 
 
+@router.get("/cluster/debug")
+async def cluster_debug(vector_field: str = "image_vector"):
+    """
+    聚类调试接口：返回距离分布、eps-簇数曲线、建议参数等
+    
+    帮助用户理解数据分布，调整聚类参数。
+    """
+    from app.config import settings
+    
+    if vector_field not in ["image_vector", "face_vector", "template_vector"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid vector_field: {vector_field}. Must be one of: image_vector, face_vector, template_vector"
+        )
+    
+    try:
+        vectors_dict = milvus_client.get_all_vectors(vector_field)
+        if not vectors_dict:
+            return {"error": "No vectors found in collection"}
+        
+        ids = list(vectors_dict.keys())
+        vectors = np.array([vectors_dict[id_] for id_ in ids])
+        
+        metric = "cosine" if vector_field in ["image_vector", "face_vector"] else "euclidean"
+        debug_info = compute_clustering_debug_info(vectors, metric=metric)
+        
+        # 添加当前配置信息
+        if vector_field == "template_vector":
+            current_eps = settings.TEMPLATE_HDBSCAN_EPSILON
+        else:
+            current_eps = settings.DBSCAN_EPS
+        
+        debug_info["current_config"] = {
+            "eps": current_eps,
+            "min_samples": settings.DBSCAN_MIN_SAMPLES,
+            "vector_field": vector_field,
+            "vector_count": len(ids),
+        }
+        
+        return debug_info
+        
+    except Exception as e:
+        logger.error("Cluster debug failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/upload_dir", response_model=BatchUploadResponse)
 async def upload_from_directory(
     directory: str = Query(..., description="服务器上的图片目录绝对路径"),
