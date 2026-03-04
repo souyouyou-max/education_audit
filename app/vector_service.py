@@ -37,7 +37,7 @@ class VectorService:
     def _init_models(self):
         try:
             # CLIP（建议使用 openai/clip-vit-large-patch14 或更新版本）
-            logger.info(f"Loading CLIP model: {settings.CLIP_MODEL_NAME}")
+            logger.info("Loading CLIP model: %s", settings.CLIP_MODEL_NAME)
             self.clip_model = CLIPModel.from_pretrained(settings.CLIP_MODEL_NAME)
             self.clip_processor = CLIPProcessor.from_pretrained(
                 settings.CLIP_MODEL_NAME, use_fast=True
@@ -47,12 +47,12 @@ class VectorService:
                 self.clip_model = self.clip_model.cuda()
             logger.info("CLIP model loaded")
         except Exception as e:
-            logger.error(f"Failed to load CLIP: {e}", exc_info=True)
+            logger.error("Failed to load CLIP: %s", e, exc_info=True)
             raise
         
         try:
             # DINOv2（纯视觉自监督模型，用于模板特征提取）
-            logger.info(f"Loading DINOv2 model: {settings.DINO_MODEL_NAME}")
+            logger.info("Loading DINOv2 model: %s", settings.DINO_MODEL_NAME)
             self.dino_processor = AutoImageProcessor.from_pretrained(settings.DINO_MODEL_NAME)
             self.dino_model = AutoModel.from_pretrained(settings.DINO_MODEL_NAME)
             self.dino_model.eval()
@@ -60,13 +60,12 @@ class VectorService:
                 self.dino_model = self.dino_model.cuda()
             logger.info("DINOv2 model loaded")
         except Exception as e:
-            logger.error(f"Failed to load DINOv2: {e}", exc_info=True)
+            logger.error("Failed to load DINOv2: %s", e, exc_info=True)
             raise
 
         try:
-            # InsightFace - 强制使用 buffalo_l（目前社区公认最佳平衡模型）
-            model_name = "buffalo_l"  # 或从 settings 读取，但建议硬编码优先级最高模型
-            logger.info(f"Loading InsightFace model: {model_name}")
+            model_name = settings.INSIGHTFACE_MODEL_NAME
+            logger.info("Loading InsightFace model: %s", model_name)
             self.face_app = insightface.app.FaceAnalysis(
                 name=model_name,
                 providers=['CUDAExecutionProvider', 'CPUExecutionProvider']
@@ -75,7 +74,7 @@ class VectorService:
             self.face_app.prepare(ctx_id=0, det_size=(640, 640))
             logger.info("InsightFace loaded")
         except Exception as e:
-            logger.error(f"Failed to load InsightFace: {e}", exc_info=True)
+            logger.error("Failed to load InsightFace: %s", e, exc_info=True)
             raise
     
     def extract_image_vector(self, image: Image.Image) -> List[float]:
@@ -101,10 +100,10 @@ class VectorService:
                 expected_dim = settings.IMAGE_VECTOR_DIM
                 if len(vector) != expected_dim:
                     raise ValueError(f"CLIP vector dim mismatch: got {len(vector)}, expected {expected_dim}")
-                
+
                 return vector
         except Exception as e:
-            logger.error(f"Image vector extraction failed: {e}", exc_info=True)
+            logger.error("Image vector extraction failed: %s", e, exc_info=True)
             raise
     
     def extract_face_vector(self, image: Image.Image, min_quality_score: float = 0.5) -> Tuple[List[float], bool]:
@@ -126,14 +125,14 @@ class VectorService:
             best_face = max(faces, key=lambda f: f.det_score)
             
             if best_face.det_score < min_quality_score:
-                logger.debug(f"Face quality too low: score={best_face.det_score:.3f}")
+                logger.debug("Face quality too low: score=%.3f", best_face.det_score)
                 return None, False
-            
+
             # 检查人脸大小（像素太小通常不可靠）
             bbox = best_face.bbox.astype(int)
             face_size = min(bbox[2] - bbox[0], bbox[3] - bbox[1])
             if face_size < 80:
-                logger.debug(f"Face too small: {face_size}px")
+                logger.debug("Face too small: %dpx", face_size)
                 return None, False
             
             embedding = best_face.embedding
@@ -144,14 +143,14 @@ class VectorService:
             
             vector = embedding.tolist()
             
-            expected_dim = settings.FACE_VECTOR_DIM  # buffalo_l 应为512
+            expected_dim = settings.FACE_VECTOR_DIM
             if len(vector) != expected_dim:
                 raise ValueError(f"Face vector dim mismatch: got {len(vector)}, expected {expected_dim}")
             
             return vector, True
         
         except Exception as e:
-            logger.error(f"Face vector extraction failed: {e}", exc_info=True)
+            logger.error("Face vector extraction failed: %s", e, exc_info=True)
             return None, False
     
     def _extract_border_hsv_histogram(self, img_array: np.ndarray,
@@ -222,7 +221,7 @@ class VectorService:
                     x2 = min(w, bbox[2] + margin)
                     processed[y1:y2, x1:x2] = gray
             except Exception as e:
-                logger.warning(f"Face masking failed: {e}")
+                logger.warning("Face masking failed: %s", e)
 
             processed_pil = Image.fromarray(processed)
             processed_pil = processed_pil.filter(
@@ -263,8 +262,7 @@ class VectorService:
 
             return vector
         except Exception as e:
-            logger.error(f"Template vector extraction failed: {e}",
-                         exc_info=True)
+            logger.error("Template vector extraction failed: %s", e, exc_info=True)
             return None
     
     def get_face_attributes(self, image: Image.Image) -> Optional[dict]:
@@ -305,15 +303,15 @@ class VectorService:
 
         try:
             image_vec = self.extract_image_vector(image)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("extract_image_vector failed: %s", e)
 
         face_vec, _ = self.extract_face_vector(image)
 
         try:
             template_vec = self.extract_template_vector(image)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error("extract_template_vector failed: %s", e)
 
         # 保证返回合法向量（None → 零向量）
         if image_vec is None:
@@ -324,6 +322,21 @@ class VectorService:
             template_vec = [0.0] * settings.TEMPLATE_VECTOR_DIM
 
         return image_vec, face_vec, template_vec
+
+
+    def extract_all_vectors_batch(
+        self, images: list
+    ) -> list:
+        """批量提取多张图片的所有向量（减少模型加载开销）
+
+        Args:
+            images: PIL.Image 列表
+
+        Returns:
+            list of (image_vec, face_vec, template_vec) tuples
+        """
+        self._ensure_models_loaded()
+        return [self.extract_all_vectors(img) for img in images]
 
 
 # 全局实例

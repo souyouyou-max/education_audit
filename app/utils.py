@@ -15,7 +15,7 @@ def ensure_upload_dir():
     """确保上传目录存在"""
     if not os.path.exists(settings.UPLOAD_DIR):
         os.makedirs(settings.UPLOAD_DIR)
-        logger.info(f"Created upload directory: {settings.UPLOAD_DIR}")
+        logger.info("Created upload directory: %s", settings.UPLOAD_DIR)
 
 
 def validate_image_file(file_content: bytes, filename: str) -> bool:
@@ -30,7 +30,7 @@ def validate_image_file(file_content: bytes, filename: str) -> bool:
         image.verify()
         return True
     except Exception as e:
-        logger.error(f"Invalid image file: {e}")
+        logger.error("Invalid image file: %s", e)
         return False
 
 
@@ -42,7 +42,7 @@ def load_image_from_bytes(file_content: bytes) -> Image.Image:
             image = image.convert('RGB')
         return image
     except Exception as e:
-        logger.error(f"Error loading image: {e}")
+        logger.error("Error loading image: %s", e)
         raise
 
 

@@ -61,9 +61,9 @@ class MilvusClient:
 
             connections.connect("default", **connection_params)
             self._connected = True
-            logger.info(f"Connected to Milvus at {settings.MILVUS_HOST}:{settings.MILVUS_PORT}")
+            logger.info("Connected to Milvus at %s:%s", settings.MILVUS_HOST, settings.MILVUS_PORT)
         except Exception as e:
-            logger.error(f"Failed to connect to Milvus: {e}")
+            logger.error("Failed to connect to Milvus: %s", e)
             raise
 
     def disconnect(self):
@@ -74,7 +74,7 @@ class MilvusClient:
                 self._connected = False
                 logger.info("Disconnected from Milvus")
             except Exception as e:
-                logger.error(f"Error disconnecting from Milvus: {e}")
+                logger.error("Error disconnecting from Milvus: %s", e)
 
     def create_collection_if_not_exists(self):
         """创建三个 collection（每个仅一个向量字段），若不存在则创建"""
@@ -88,13 +88,13 @@ class MilvusClient:
                     if field.name == vec_name and field.params.get("dim") != dim:
                         old_dim = field.params.get("dim")
                         logger.warning(
-                            f"Collection {name} dim mismatch: "
-                            f"existing={old_dim}, expected={dim}. Dropping and recreating."
+                            "Collection %s dim mismatch: existing=%s, expected=%s. Dropping and recreating.",
+                            name, old_dim, dim,
                         )
                         utility.drop_collection(name)
                         break
                 else:
-                    logger.info(f"Collection {name} already exists (dim={dim})")
+                    logger.info("Collection %s already exists (dim=%s)", name, dim)
                     return col
             fields = [
                 FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
@@ -110,7 +110,7 @@ class MilvusClient:
                 "params": {"M": settings.HNSW_M, "efConstruction": settings.HNSW_EF_CONSTRUCTION},
             }
             col.create_index(vec_name, index_params)
-            logger.info(f"Collection {name} created with index on {vec_name}")
+            logger.info("Collection %s created with index on %s", name, vec_name)
             return col
 
         self.col_image = ensure_collection(
@@ -191,16 +191,16 @@ class MilvusClient:
         results = col.query(expr="id >= 0", output_fields=[id_field, vec_name])
         return {r[id_field]: r[vec_name] for r in results}
 
-    def get_by_id(self, id: int) -> Optional[Dict[str, Any]]:
+    def get_by_id(self, entity_id: int) -> Optional[Dict[str, Any]]:
         """根据 entity_id 获取三条向量"""
         self.create_collection_if_not_exists()
         self.col_image.load()
         self.col_face.load()
         self.col_template.load()
 
-        img = self.col_image.query(expr=f"id == {id}", output_fields=["id", "image_vector"])
-        face = self.col_face.query(expr=f"entity_id == {id}", output_fields=["entity_id", "face_vector"])
-        tpl = self.col_template.query(expr=f"entity_id == {id}", output_fields=["entity_id", "template_vector"])
+        img = self.col_image.query(expr=f"id == {entity_id}", output_fields=["id", "image_vector"])
+        face = self.col_face.query(expr=f"entity_id == {entity_id}", output_fields=["entity_id", "face_vector"])
+        tpl = self.col_template.query(expr=f"entity_id == {entity_id}", output_fields=["entity_id", "template_vector"])
 
         if not img:
             return None
