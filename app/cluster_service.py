@@ -412,54 +412,21 @@ class ClusterService:
             n = len(valid_ids)
 
             # ── 阶段 2：特征融合 ─────────────────────────────────────────
-            # 颜色特征 L2 归一化到单位范数，与 DINOv2 特征量级对齐
+            # dino_arr: (N, 1024), color_arr: (N, 52) — 维度不同，不能直接相加
+            # 正确做法：各自 L2 归一化后加权拼接，再整体归一化
+            # 拼接后维度: (N, 1024+52) = (N, 1076)，HDBSCAN 用欧氏距离聚类
+            dino_norm = dino_arr / (np.linalg.norm(dino_arr, axis=1, keepdims=True) + 1e-8)
             color_norm = color_arr / (np.linalg.norm(color_arr, axis=1, keepdims=True) + 1e-8)
             cw = settings.TEMPLATE_COLOR_WEIGHT
-            combined = (1.0 - cw) * dino_arr + cw * color_norm  # (N, 1024)
-            # 不再对 combined 整体 L2 归一化——保留两者的欧氏距离语义
-            # ── 特征融合：DINOv2 (1024D) + 颜色特征 (4D) ──
-            # 将颜色特征扩展到 1024 维，然后与 DINOv2 加权合并
-            # 这样可以同时利用结构特征和颜色特征进行聚类
-            from sklearn.preprocessing import StandardScaler
-
-            # 颜色特征插值扩展到 1024 维
-            dino_dim = dino_arr.shape[1]  # 1024
-            color_dim = color_arr.shape[1]  # 4
-
-            color_expanded = np.zeros((n, dino_dim))
-            for i in range(n):
-                # 线性插值：4维 → 1024维
-                color_expanded[i] = np.interp(
-                    np.linspace(0, 1, dino_dim),
-                    np.linspace(0, 1, color_dim),
-                    color_arr[i]
-                )
-
-            # 分别标准化
-            scaler_dino = StandardScaler()
-            scaler_color = StandardScaler()
-            dino_norm = scaler_dino.fit_transform(dino_arr)
-            color_norm = scaler_color.fit_transform(color_expanded)
-
-            # 加权融合：DINOv2 权重 0.8，颜色权重 0.2（颜色辅助，结构为主）
-            color_weight = float(os.getenv("TEMPLATE_COLOR_WEIGHT", "0.2"))
-            combined = (1.0 - color_weight) * dino_norm + color_weight * color_norm
-
+            # 加权拼接：dino 占 (1-cw) 权重，颜色占 cw 权重（通过缩放体现）
+            combined = np.concatenate([
+                (1.0 - cw) * dino_norm,   # (N, 1024)
+                cw * color_norm,           # (N, 52)
+            ], axis=1)  # → (N, 1076)
             logger.info(
-                "Feature fusion: dino_dim=%d, color_dim=%d→%d, color_weight=%.2f",
-                dino_dim, color_dim, dino_dim, color_weight
+                "Feature fusion: dino(1024) + LAB_color(52) → combined(%d), color_weight=%.2f",
+                combined.shape[1], cw,
             )
-
-            # 使用融合后的特征进行后续聚类
-            dino_arr = combined  # 替换为融合特征
-
-            # 第一阶段：KMeans 颜色预分组（仍用原始颜色特征）
-            n_pre = min(settings.TEMPLATE_KMEANS_N, n)
-            pre_labels = KMeans(n_clusters=n_pre, n_init=10, random_state=42).fit_predict(color_arr)
-            pre_groups: Dict[int, List[int]] = defaultdict(list)
-            for i, lbl in enumerate(pre_labels):
-                pre_groups[int(lbl)].append(i)
-
             # ── 阶段 3：全局 HDBSCAN（eom 方法）────────────────────────────
             # eom（Excess of Mass）比 leaf 更稳健：优先选择层级树中持久性强的大簇，
             # 减少因密度微小波动导致大簇被错误拆分。
