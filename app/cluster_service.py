@@ -12,6 +12,7 @@ import hdbscan
 import cv2
 import torch
 from PIL import Image
+from sklearn.metrics.pairwise import pairwise_distances
 from app.config import settings
 from app.milvus_client import milvus_client
 from app.utils import get_filenames_for_ids, get_image_path_by_id
@@ -125,13 +126,6 @@ def compute_clustering_debug_info(vectors: np.ndarray, metric: str = "cosine") -
         "sample_count": n,
     }
 
-
-# 添加 pairwise_distances 导入
-from sklearn.metrics.pairwise import pairwise_distances
-
-from app.config import settings
-from app.milvus_client import milvus_client
-from app.utils import get_filenames_for_ids, get_image_path_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -249,32 +243,6 @@ class ClusterService:
             return 0.0
 
     @staticmethod
-    def _get_color_red_feature(img_path: str) -> np.ndarray:
-        """提取图片的主色(BGR均值) + 红色印章比例，用于 KMeans 预分组。"""
-        try:
-            img = cv2.imread(img_path)
-            if img is None:
-                return np.array([128 / 255.0, 128 / 255.0, 128 / 255.0, 0.0])
-
-            img = cv2.medianBlur(img, 5)
-            mask = cv2.inRange(img, np.array([20, 20, 20]), np.array([235, 235, 235]))
-            masked_pixels = img.reshape(-1, 3)[mask.reshape(-1) > 0]
-            mean_color = (
-                np.mean(masked_pixels, axis=0) / 255.0
-                if len(masked_pixels) > 0
-                else np.mean(img.reshape(-1, 3), axis=0) / 255.0
-            )
-            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            mask_red = (
-                cv2.inRange(hsv, np.array([0, 70, 50]), np.array([10, 255, 255]))
-                + cv2.inRange(hsv, np.array([170, 70, 50]), np.array([180, 255, 255]))
-            )
-            red_ratio = np.sum(mask_red > 0) / (img.shape[0] * img.shape[1]) * 100 / 10.0
-            return np.concatenate([mean_color, [red_ratio]])
-        except Exception:
-            return np.array([128 / 255.0, 128 / 255.0, 128 / 255.0, 0.0])
-
-    @staticmethod
     def _extract_lab_color_features(img_path: str) -> np.ndarray:
         """提取 LAB 颜色直方图特征（52维）：L/A/B 各16 bin + LAB均值3维 + 红印比例1维。
 
@@ -331,7 +299,7 @@ class ClusterService:
         """
         from app.vector_service import vector_service
 
-        LAYOUT_SPLIT_THRESHOLD = 0.05
+        LAYOUT_SPLIT_THRESHOLD = settings.TEMPLATE_LAYOUT_SPLIT_THRESHOLD
 
         def _empty(msg: str = ""):
             result = {
@@ -468,7 +436,7 @@ class ClusterService:
                 cluster_layout_type: Dict[int, str] = {}
                 for lbl in unique_labels:
                     midx = np.where(all_labels == lbl)[0]
-                    centroids[lbl] = dino_arr[midx].mean(axis=0)  # DINOv2 质心
+                    centroids[lbl] = combined[midx].mean(axis=0)  # combined 质心（与HDBSCAN基准一致）
                     cluster_layout_type[lbl] = (
                         "folded" if edge_asymmetries[midx].mean() >= LAYOUT_SPLIT_THRESHOLD
                         else "single"
