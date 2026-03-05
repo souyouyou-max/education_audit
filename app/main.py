@@ -59,8 +59,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="学历证件相似度检测系统",
-    description="基于 Milvus 和向量相似度的学历证件智能稽核系统",
+    title="学历证件相似度检测",
+    description="基于 Milvus 和向量相似度的学历证件智能稽核",
     version="1.0.0",
     lifespan=lifespan,
 )

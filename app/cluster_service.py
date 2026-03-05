@@ -7,7 +7,7 @@ from typing import List, Dict, Any, Optional
 import numpy as np
 from collections import defaultdict
 from scipy.spatial.distance import pdist, squareform
-from sklearn.cluster import DBSCAN, KMeans
+from sklearn.cluster import DBSCAN
 import hdbscan
 import cv2
 import torch
@@ -274,9 +274,81 @@ class ClusterService:
         except Exception:
             return np.array([128 / 255.0, 128 / 255.0, 128 / 255.0, 0.0])
 
+    @staticmethod
+    def _extract_lab_color_features(img_path: str) -> np.ndarray:
+        """提取 LAB 颜色直方图特征（52维）：L/A/B 各16 bin + LAB均值3维 + 红印比例1维。
+
+        相比原 BGR均值+红印比例（4维），LAB直方图对扫描亮度变化更鲁棒，
+        对同模板不同色调证书（如印刷年代导致的泛黄）具有更细粒度区分能力。
+        """
+        try:
+            img = cv2.imread(img_path)
+            if img is None:
+                return np.zeros(52)
+            img = cv2.medianBlur(img, 5)
+
+            lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+            hist_l = cv2.calcHist([lab], [0], None, [16], [0, 256]).flatten()
+            hist_a = cv2.calcHist([lab], [1], None, [16], [0, 256]).flatten()
+            hist_b = cv2.calcHist([lab], [2], None, [16], [0, 256]).flatten()
+            hist_l /= hist_l.sum() + 1e-8
+            hist_a /= hist_a.sum() + 1e-8
+            hist_b /= hist_b.sum() + 1e-8
+            mean_lab = lab.mean(axis=(0, 1)) / 255.0
+
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            mask_red = (
+                cv2.inRange(hsv, np.array([0, 70, 50]), np.array([10, 255, 255]))
+                + cv2.inRange(hsv, np.array([170, 70, 50]), np.array([180, 255, 255]))
+            )
+            red_ratio = np.sum(mask_red > 0) / (img.shape[0] * img.shape[1])
+
+            return np.concatenate([hist_l, hist_a, hist_b, mean_lab, [red_ratio]])
+        except Exception:
+            return np.zeros(52)
+
     def cluster_by_template_vector(self) -> Dict[str, Any]:
-        """两阶段模板聚类：KMeans 颜色预分组 → 组内 HDBSCAN 精细聚类。"""
+        """模板聚类（全局 HDBSCAN + DINOv2/LAB 特征融合）。
+
+        改进点（相比原 KMeans 预分组方案）：
+        1. 去除 KMeans 预分组 —— KMeans 按颜色粗分会把同模板不同扫描色调的证书分到不同预组，
+           导致后续 HDBSCAN 无法发现它们属于同一模板；也会把视觉相近但模板不同的证书分到同一
+           预组，HDBSCAN 因共享密度而错误合并。
+        2. 全局 HDBSCAN（eom方法）—— 直接在全量特征上运行，避免预分组引入的边界误差。
+        3. DINOv2 + LAB颜色特征融合 —— 纯 DINOv2 靠视觉结构区分模板，对颜色无感；
+           加入 LAB直方图（52维）后，颜色差异对相似度有独立贡献，
+           有效区分"结构相近、颜色不同"的不同模板证书。
+        4. 噪声点互配对 —— 被孤立为噪声的同模板证书（如只有1张），
+           通过两两 DINOv2 距离判断是否可以配对成新簇，减少单点丢失。
+
+        阶段：
+          1. 特征提取（DINOv2 1024D + LAB 52D）
+          2. 特征融合（加权归一化拼接）
+          3. 全局 HDBSCAN（eom，epsilon=TEMPLATE_HDBSCAN_EPSILON）
+          4. 布局分裂（单页 vs 对折）
+          5. 跨簇合并（DINOv2 质心距离 < TEMPLATE_MERGE_THRESHOLD，布局兼容）
+          6. 噪声回收（最近质心 + 噪声互配对）
+        """
         from app.vector_service import vector_service
+
+        LAYOUT_SPLIT_THRESHOLD = 0.05
+
+        def _empty(msg: str = ""):
+            result = {
+                "groups": [], "abnormal_groups": [],
+                "total_items": 0, "total_groups": 0,
+                "params_used": {
+                    "hdbscan_epsilon": settings.TEMPLATE_HDBSCAN_EPSILON,
+                    "color_weight": settings.TEMPLATE_COLOR_WEIGHT,
+                    "merge_threshold": settings.TEMPLATE_MERGE_THRESHOLD,
+                    "noise_pair_threshold": settings.TEMPLATE_NOISE_PAIR_THRESHOLD,
+                    "layout_split_threshold": LAYOUT_SPLIT_THRESHOLD,
+                },
+                "id_to_filename": {},
+            }
+            if msg:
+                result["message"] = msg
+            return result
 
         try:
             upload_dir = settings.UPLOAD_DIR
@@ -286,21 +358,13 @@ class ClusterService:
                 if os.path.splitext(fname)[1].lower() in settings.ALLOWED_EXTENSIONS
                 and os.path.splitext(fname)[0].isdigit()
             )
-
             if not all_entity_ids:
-                return {
-                    "groups": [], "abnormal_groups": [],
-                    "total_items": 0, "total_groups": 0,
-                    "params_used": {
-                        "hdbscan_epsilon": settings.TEMPLATE_HDBSCAN_EPSILON,
-                        "kmeans_n": settings.TEMPLATE_KMEANS_N,
-                    },
-                    "id_to_filename": {},
-                }
+                return _empty("No images found in uploads/")
 
             vector_service._ensure_models_loaded()
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
+            # ── 阶段 1：特征提取 ──────────────────────────────────────────
             dino_features: List[np.ndarray] = []
             color_features: List[np.ndarray] = []
             valid_ids: List[int] = []
@@ -336,35 +400,32 @@ class ClusterService:
                     dino_features.extend(feats.cpu().numpy())
 
                 for img_path in batch_paths:
-                    color_features.append(self._get_color_red_feature(img_path))
+                    color_features.append(self._extract_lab_color_features(img_path))
                     img_paths.append(img_path)
                 valid_ids.extend(batch_ids_ok)
 
             if not valid_ids:
-                return {
-                    "groups": [], "abnormal_groups": [],
-                    "total_items": 0, "total_groups": 0,
-                    "message": "No images found in uploads/",
-                    "params_used": {
-                        "hdbscan_epsilon": settings.TEMPLATE_HDBSCAN_EPSILON,
-                        "kmeans_n": settings.TEMPLATE_KMEANS_N,
-                    },
-                    "id_to_filename": {},
-                }
+                return _empty("No images found in uploads/")
 
-            dino_arr = np.array(dino_features)
-            color_arr = np.array(color_features)
+            dino_arr = np.array(dino_features)   # (N, 1024) L2归一化
+            color_arr = np.array(color_features)  # (N, 52)
             n = len(valid_ids)
 
+            # ── 阶段 2：特征融合 ─────────────────────────────────────────
+            # 颜色特征 L2 归一化到单位范数，与 DINOv2 特征量级对齐
+            color_norm = color_arr / (np.linalg.norm(color_arr, axis=1, keepdims=True) + 1e-8)
+            cw = settings.TEMPLATE_COLOR_WEIGHT
+            combined = (1.0 - cw) * dino_arr + cw * color_norm  # (N, 1024)
+            # 不再对 combined 整体 L2 归一化——保留两者的欧氏距离语义
             # ── 特征融合：DINOv2 (1024D) + 颜色特征 (4D) ──
             # 将颜色特征扩展到 1024 维，然后与 DINOv2 加权合并
             # 这样可以同时利用结构特征和颜色特征进行聚类
             from sklearn.preprocessing import StandardScaler
-            
+
             # 颜色特征插值扩展到 1024 维
             dino_dim = dino_arr.shape[1]  # 1024
             color_dim = color_arr.shape[1]  # 4
-            
+
             color_expanded = np.zeros((n, dino_dim))
             for i in range(n):
                 # 线性插值：4维 → 1024维
@@ -373,22 +434,22 @@ class ClusterService:
                     np.linspace(0, 1, color_dim),
                     color_arr[i]
                 )
-            
+
             # 分别标准化
             scaler_dino = StandardScaler()
             scaler_color = StandardScaler()
             dino_norm = scaler_dino.fit_transform(dino_arr)
             color_norm = scaler_color.fit_transform(color_expanded)
-            
+
             # 加权融合：DINOv2 权重 0.8，颜色权重 0.2（颜色辅助，结构为主）
             color_weight = float(os.getenv("TEMPLATE_COLOR_WEIGHT", "0.2"))
             combined = (1.0 - color_weight) * dino_norm + color_weight * color_norm
-            
+
             logger.info(
                 "Feature fusion: dino_dim=%d, color_dim=%d→%d, color_weight=%.2f",
                 dino_dim, color_dim, dino_dim, color_weight
             )
-            
+
             # 使用融合后的特征进行后续聚类
             dino_arr = combined  # 替换为融合特征
 
@@ -399,31 +460,26 @@ class ClusterService:
             for i, lbl in enumerate(pre_labels):
                 pre_groups[int(lbl)].append(i)
 
-            # 第二阶段：组内 HDBSCAN 精细聚类
-            all_labels = np.full(n, -1, dtype=int)
-            cluster_counter = 0
-            for indices in pre_groups.values():
-                if len(indices) < settings.DBSCAN_MIN_SAMPLES:
-                    continue
-                sub_labels = hdbscan.HDBSCAN(
-                    min_cluster_size=settings.DBSCAN_MIN_SAMPLES,
-                    min_samples=1,
-                    metric="euclidean",
-                    cluster_selection_epsilon=settings.TEMPLATE_HDBSCAN_EPSILON,
-                    cluster_selection_method="leaf",
-                ).fit_predict(dino_arr[indices])
-                for local_idx, global_idx in enumerate(indices):
-                    if sub_labels[local_idx] != -1:
-                        all_labels[global_idx] = cluster_counter + int(sub_labels[local_idx])
-                cluster_counter += len(set(sub_labels) - {-1})
+            # ── 阶段 3：全局 HDBSCAN（eom 方法）────────────────────────────
+            # eom（Excess of Mass）比 leaf 更稳健：优先选择层级树中持久性强的大簇，
+            # 减少因密度微小波动导致大簇被错误拆分。
+            all_labels = hdbscan.HDBSCAN(
+                min_cluster_size=settings.DBSCAN_MIN_SAMPLES,
+                min_samples=1,
+                metric="euclidean",
+                cluster_selection_epsilon=settings.TEMPLATE_HDBSCAN_EPSILON,
+                cluster_selection_method="eom",
+            ).fit_predict(combined)
+            logger.info(
+                "Template clustering HDBSCAN: n=%d, clusters=%d, noise=%d",
+                n, len(set(all_labels) - {-1}), int(np.sum(all_labels == -1)),
+            )
 
-            # 第三阶段：布局分裂
-            LAYOUT_SPLIT_THRESHOLD = 0.05
-            edge_asymmetries = np.array([
-                self._compute_edge_asymmetry(img_paths[i]) for i in range(n)
-            ])
+            # ── 阶段 4：布局分裂（单页 vs 对折双页） ────────────────────────
+            edge_asymmetries = np.array([self._compute_edge_asymmetry(p) for p in img_paths])
             new_labels = all_labels.copy()
-            next_label = int(max(all_labels)) + 1 if n > 0 else 0
+            cur_max = int(all_labels.max()) if (all_labels >= 0).any() else -1
+            next_label = cur_max + 1
             for lbl in sorted(set(all_labels) - {-1}):
                 member_idx = np.where(all_labels == lbl)[0]
                 if len(member_idx) < 2 * settings.DBSCAN_MIN_SAMPLES:
@@ -438,16 +494,16 @@ class ClusterService:
                     next_label += 1
             all_labels = new_labels
 
-            # 第四阶段：跨预组簇合并（布局兼容）
+            # ── 阶段 5：跨簇合并（布局兼容 + DINOv2 质心距离） ────────────────
             unique_labels = sorted(set(all_labels) - {-1})
             if len(unique_labels) > 1:
                 centroids: Dict[int, np.ndarray] = {}
                 cluster_layout_type: Dict[int, str] = {}
                 for lbl in unique_labels:
-                    member_idx = np.where(all_labels == lbl)[0]
-                    centroids[lbl] = dino_arr[member_idx].mean(axis=0)
+                    midx = np.where(all_labels == lbl)[0]
+                    centroids[lbl] = dino_arr[midx].mean(axis=0)  # DINOv2 质心
                     cluster_layout_type[lbl] = (
-                        "folded" if edge_asymmetries[member_idx].mean() >= LAYOUT_SPLIT_THRESHOLD
+                        "folded" if edge_asymmetries[midx].mean() >= LAYOUT_SPLIT_THRESHOLD
                         else "single"
                     )
 
@@ -455,7 +511,7 @@ class ClusterService:
                 centroid_matrix = np.array([centroids[l] for l in label_list])
                 dist_matrix = squareform(pdist(centroid_matrix, metric="euclidean"))
 
-                parent = {l: l for l in label_list}
+                parent: Dict[int, int] = {l: l for l in label_list}
 
                 def find(x: int) -> int:
                     while parent[x] != x:
@@ -463,10 +519,9 @@ class ClusterService:
                         x = parent[x]
                     return x
 
-                merge_threshold = settings.TEMPLATE_MERGE_THRESHOLD
                 for i in range(len(label_list)):
                     for j in range(i + 1, len(label_list)):
-                        if dist_matrix[i, j] < merge_threshold:
+                        if dist_matrix[i, j] < settings.TEMPLATE_MERGE_THRESHOLD:
                             li, lj = label_list[i], label_list[j]
                             if cluster_layout_type[li] != cluster_layout_type[lj]:
                                 continue
@@ -487,9 +542,11 @@ class ClusterService:
                     merged_labels[idx] = root_to_new[root]
                 all_labels = merged_labels
 
-            # 第五阶段：噪声点回收
-            noise_idx = np.where(all_labels == -1)[0]
+            # ── 阶段 6：噪声回收 ─────────────────────────────────────────
+            # 6a. 最近质心回收（噪声点到已有簇质心 DINOv2 距离 < merge_threshold）
             cluster_labels_now = sorted(set(all_labels) - {-1})
+            noise_idx = np.where(all_labels == -1)[0]
+
             if len(noise_idx) > 0 and cluster_labels_now:
                 centroids_final = {
                     lbl: dino_arr[np.where(all_labels == lbl)[0]].mean(axis=0)
@@ -503,7 +560,41 @@ class ClusterService:
                     if dists[best_j] < settings.TEMPLATE_MERGE_THRESHOLD:
                         all_labels[ni] = centroid_labels_list[best_j]
 
-            # 整理输出
+            # 6b. 剩余噪声互配对（两两 DINOv2 距离 < noise_pair_threshold → 生成新簇）
+            noise_idx = np.where(all_labels == -1)[0]
+            if len(noise_idx) >= 2:
+                pair_threshold = settings.TEMPLATE_NOISE_PAIR_THRESHOLD
+                noise_parent: Dict[int, int] = {int(i): int(i) for i in noise_idx}
+
+                def find_n(x: int) -> int:
+                    while noise_parent[x] != x:
+                        noise_parent[x] = noise_parent[noise_parent[x]]
+                        x = noise_parent[x]
+                    return x
+
+                for ii_pos, ia in enumerate(noise_idx):
+                    for ib in noise_idx[ii_pos + 1:]:
+                        d = np.linalg.norm(dino_arr[ia] - dino_arr[ib])
+                        if d < pair_threshold:
+                            ra, rb = find_n(int(ia)), find_n(int(ib))
+                            if ra != rb:
+                                noise_parent[rb] = ra
+
+                # 只将有≥2个成员的配对组提升为新簇
+                root_members: Dict[int, List[int]] = defaultdict(list)
+                for ni in noise_idx:
+                    root_members[find_n(int(ni))].append(int(ni))
+
+                cur_max2 = int(all_labels.max()) if (all_labels >= 0).any() else -1
+                next_lbl = cur_max2 + 1
+                for root, members in root_members.items():
+                    if len(members) >= settings.DBSCAN_MIN_SAMPLES:
+                        for mi in members:
+                            all_labels[mi] = next_lbl
+                        logger.debug("Noise pairing: new cluster %d with %d members", next_lbl, len(members))
+                        next_lbl += 1
+
+            # ── 整理输出 ─────────────────────────────────────────────────
             groups: Dict = {}
             for idx, label in enumerate(all_labels):
                 item_id = valid_ids[idx]
@@ -516,6 +607,13 @@ class ClusterService:
                 if isinstance(gid, int) and len(items) >= settings.ABNORMAL_CLUSTER_MIN_SIZE
             ]
 
+            n_clusters = len([g for g in groups if isinstance(g, int)])
+            n_noise = len([g for g in groups if not isinstance(g, int)])
+            logger.info(
+                "Template clustering done: n=%d, clusters=%d, noise_singletons=%d",
+                n, n_clusters, n_noise,
+            )
+
             return {
                 "groups": [
                     {"group_id": gid, "items": items, "count": len(items)}
@@ -526,8 +624,9 @@ class ClusterService:
                 "total_groups": len(groups),
                 "params_used": {
                     "hdbscan_epsilon": settings.TEMPLATE_HDBSCAN_EPSILON,
-                    "kmeans_n": n_pre,
+                    "color_weight": settings.TEMPLATE_COLOR_WEIGHT,
                     "merge_threshold": settings.TEMPLATE_MERGE_THRESHOLD,
+                    "noise_pair_threshold": settings.TEMPLATE_NOISE_PAIR_THRESHOLD,
                     "layout_split_threshold": LAYOUT_SPLIT_THRESHOLD,
                 },
                 "id_to_filename": get_filenames_for_ids(valid_ids),

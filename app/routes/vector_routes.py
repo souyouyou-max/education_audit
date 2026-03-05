@@ -38,7 +38,7 @@ _STATIC_DIR = Path(__file__).parent.parent.parent / "static"
 async def root():
     """根路径"""
     return {
-        "message": "学历证件相似度检测系统",
+        "message": "学历证件相似度检测",
         "version": "1.0.0",
         "endpoints": {
             "upload": "POST /upload - 批量上传学历图片（支持多文件）",

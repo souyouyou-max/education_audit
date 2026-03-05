@@ -50,11 +50,13 @@ class Settings:
     DBSCAN_MIN_SAMPLES: int = 2  # 形成簇的最小样本数（2 条相似即可成簇，如可能重复）
     ABNORMAL_CLUSTER_MIN_SIZE: int = 2  # 簇内数量 >= 此值即标记为异常（2 条相似就值得人工核查）
 
-    # 模板聚类专用参数（两阶段：KMeans 颜色预分组 + HDBSCAN 精细聚类）
+    # 模板聚类专用参数（全局 HDBSCAN + DINOv2/LAB 特征融合，替代原 KMeans 预分组方案）
     TEMPLATE_DBSCAN_EPS: float = float(os.getenv("TEMPLATE_DBSCAN_EPS", "0.09"))  # 保留兼容，不再使用
-    TEMPLATE_HDBSCAN_EPSILON: float = float(os.getenv("TEMPLATE_HDBSCAN_EPSILON", "0.12"))  # HDBSCAN 精细聚类 epsilon（欧氏距离）；0.16会混淆高中/中学，0.12更严格
-    TEMPLATE_KMEANS_N: int = int(os.getenv("TEMPLATE_KMEANS_N", "5"))  # KMeans 预分组数
-    TEMPLATE_MERGE_THRESHOLD: float = float(os.getenv("TEMPLATE_MERGE_THRESHOLD", "0.37"))  # 跨预组簇合并+噪声回收阈值（同模板质心距≈0.28~0.36，跨模板≈0.48+，取0.37安全）
+    TEMPLATE_HDBSCAN_EPSILON: float = float(os.getenv("TEMPLATE_HDBSCAN_EPSILON", "0.05"))  # HDBSCAN cluster_selection_epsilon（融合特征空间）
+    TEMPLATE_KMEANS_N: int = int(os.getenv("TEMPLATE_KMEANS_N", "5"))  # 保留兼容，不再使用
+    TEMPLATE_MERGE_THRESHOLD: float = float(os.getenv("TEMPLATE_MERGE_THRESHOLD", "0.37"))  # DINOv2 质心欧氏距离跨簇合并阈值（同模板≈0.28~0.36，跨模板≈0.48+）
+    TEMPLATE_COLOR_WEIGHT: float = float(os.getenv("TEMPLATE_COLOR_WEIGHT", "0.3"))   # LAB 颜色特征融合权重（0=纯DINOv2，1=纯颜色；0.3 在颜色相近模板中有效区分细微结构差异）
+    TEMPLATE_NOISE_PAIR_THRESHOLD: float = float(os.getenv("TEMPLATE_NOISE_PAIR_THRESHOLD", "0.12"))  # 噪声点互配对阈值（DINOv2 欧氏距离，同模板≤0.36）
     TEMPLATE_BLUR_RADIUS: int = 2        # 高斯模糊半径：轻度模糊，消除扫描噪点
     TEMPLATE_BORDER_RATIO: float = 0.13  # HSV 直方图采样的边框宽度（只采最外框）
     
