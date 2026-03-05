@@ -356,7 +356,43 @@ class ClusterService:
             color_arr = np.array(color_features)
             n = len(valid_ids)
 
-            # 第一阶段：KMeans 颜色预分组
+            # ── 特征融合：DINOv2 (1024D) + 颜色特征 (4D) ──
+            # 将颜色特征扩展到 1024 维，然后与 DINOv2 加权合并
+            # 这样可以同时利用结构特征和颜色特征进行聚类
+            from sklearn.preprocessing import StandardScaler
+            
+            # 颜色特征插值扩展到 1024 维
+            dino_dim = dino_arr.shape[1]  # 1024
+            color_dim = color_arr.shape[1]  # 4
+            
+            color_expanded = np.zeros((n, dino_dim))
+            for i in range(n):
+                # 线性插值：4维 → 1024维
+                color_expanded[i] = np.interp(
+                    np.linspace(0, 1, dino_dim),
+                    np.linspace(0, 1, color_dim),
+                    color_arr[i]
+                )
+            
+            # 分别标准化
+            scaler_dino = StandardScaler()
+            scaler_color = StandardScaler()
+            dino_norm = scaler_dino.fit_transform(dino_arr)
+            color_norm = scaler_color.fit_transform(color_expanded)
+            
+            # 加权融合：DINOv2 权重 0.8，颜色权重 0.2（颜色辅助，结构为主）
+            color_weight = float(os.getenv("TEMPLATE_COLOR_WEIGHT", "0.2"))
+            combined = (1.0 - color_weight) * dino_norm + color_weight * color_norm
+            
+            logger.info(
+                "Feature fusion: dino_dim=%d, color_dim=%d→%d, color_weight=%.2f",
+                dino_dim, color_dim, dino_dim, color_weight
+            )
+            
+            # 使用融合后的特征进行后续聚类
+            dino_arr = combined  # 替换为融合特征
+
+            # 第一阶段：KMeans 颜色预分组（仍用原始颜色特征）
             n_pre = min(settings.TEMPLATE_KMEANS_N, n)
             pre_labels = KMeans(n_clusters=n_pre, n_init=10, random_state=42).fit_predict(color_arr)
             pre_groups: Dict[int, List[int]] = defaultdict(list)
