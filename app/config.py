@@ -56,7 +56,7 @@ class Settings:
     TEMPLATE_KMEANS_N: int = int(os.getenv("TEMPLATE_KMEANS_N", "5"))  # 保留兼容，不再使用
     TEMPLATE_MERGE_THRESHOLD: float = float(os.getenv("TEMPLATE_MERGE_THRESHOLD", "0.37"))  # DINOv2 质心欧氏距离跨簇合并阈值（同模板≈0.28~0.36，跨模板≈0.48+）
     TEMPLATE_COLOR_WEIGHT: float = float(os.getenv("TEMPLATE_COLOR_WEIGHT", "0.3"))   # LAB 颜色特征融合权重（0=纯DINOv2，1=纯颜色；0.3 在颜色相近模板中有效区分细微结构差异）
-    TEMPLATE_NOISE_PAIR_THRESHOLD: float = float(os.getenv("TEMPLATE_NOISE_PAIR_THRESHOLD", "0.12"))  # 噪声点互配对阈值（DINOv2 欧氏距离，同模板≤0.36）
+    TEMPLATE_NOISE_PAIR_THRESHOLD: float = float(os.getenv("TEMPLATE_NOISE_PAIR_THRESHOLD", "0.30"))  # 噪声点互配对阈值（combined 欧氏距离，0.30 可覆盖大多数同模板孤立点）
     TEMPLATE_BLUR_RADIUS: int = 2        # 高斯模糊半径：轻度模糊，消除扫描噪点
     TEMPLATE_BORDER_RATIO: float = 0.13  # HSV 直方图采样的边框宽度（只采最外框）
     
