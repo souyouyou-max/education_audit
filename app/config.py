@@ -52,11 +52,11 @@ class Settings:
 
     # 模板聚类专用参数（全局 HDBSCAN + DINOv2/LAB 特征融合，替代原 KMeans 预分组方案）
     TEMPLATE_DBSCAN_EPS: float = float(os.getenv("TEMPLATE_DBSCAN_EPS", "0.09"))  # 保留兼容，不再使用
-    TEMPLATE_HDBSCAN_EPSILON: float = float(os.getenv("TEMPLATE_HDBSCAN_EPSILON", "0.20"))  # HDBSCAN cluster_selection_epsilon（1076D融合特征欧氏距离，同模板内距离~0.28-0.36，0.20 让HDBSCAN主动合并近邻点减少噪点）
+    TEMPLATE_HDBSCAN_EPSILON: float = float(os.getenv("TEMPLATE_HDBSCAN_EPSILON", "0.08"))  # HDBSCAN cluster_selection_epsilon（cosine距离，同模板DINOv2余弦距离约0.01~0.08，0.08可合并绝大多数同模板点）
     TEMPLATE_KMEANS_N: int = int(os.getenv("TEMPLATE_KMEANS_N", "5"))  # 保留兼容，不再使用
-    TEMPLATE_MERGE_THRESHOLD: float = float(os.getenv("TEMPLATE_MERGE_THRESHOLD", "0.37"))  # combined质心欧氏距离跨簇合并阈值（同模板combined距离≈0.14~0.36，跨模板≈0.44+）
+    TEMPLATE_MERGE_THRESHOLD: float = float(os.getenv("TEMPLATE_MERGE_THRESHOLD", "0.40"))  # 质心欧氏距离跨簇合并阈值（L2归一化cosine空间：cosine=0.08→euc=0.40，跨模板cosine>0.15→euc>0.55）
     TEMPLATE_COLOR_WEIGHT: float = float(os.getenv("TEMPLATE_COLOR_WEIGHT", "0.3"))   # LAB 颜色特征融合权重（0=纯DINOv2，1=纯颜色；0.3 在颜色相近模板中有效区分细微结构差异）
-    TEMPLATE_NOISE_PAIR_THRESHOLD: float = float(os.getenv("TEMPLATE_NOISE_PAIR_THRESHOLD", "0.22"))  # 噪声点互配对阈值（combined 欧氏距离；分组准确后适当放宽）
+    TEMPLATE_NOISE_PAIR_THRESHOLD: float = float(os.getenv("TEMPLATE_NOISE_PAIR_THRESHOLD", "0.45"))  # 噪声点互配对阈值（L2归一化欧氏距离；cosine=0.10→euc=0.447，覆盖同模板边缘点）
     TEMPLATE_LAYOUT_SPLIT_THRESHOLD: float = float(os.getenv("TEMPLATE_LAYOUT_SPLIT_THRESHOLD", "0.05"))  # 布局分裂阈值：左右边缘不对称度，> 此值认为是对折双页
     TEMPLATE_BLUR_RADIUS: int = 2        # 高斯模糊半径：轻度模糊，消除扫描噪点
     TEMPLATE_BORDER_RATIO: float = 0.13  # HSV 直方图采样的边框宽度（只采最外框）

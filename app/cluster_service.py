@@ -379,21 +379,16 @@ class ClusterService:
             color_arr = np.array(color_features)  # (N, 52)
             n = len(valid_ids)
 
-            # ── 阶段 2：特征融合 ─────────────────────────────────────────
-            # dino_arr: (N, 1024), color_arr: (N, 52) — 维度不同，不能直接相加
-            # 正确做法：各自 L2 归一化后加权拼接，再整体归一化
-            # 拼接后维度: (N, 1024+52) = (N, 1076)，HDBSCAN 用欧氏距离聚类
-            dino_norm = dino_arr / (np.linalg.norm(dino_arr, axis=1, keepdims=True) + 1e-8)
+            # ── 阶段 2：特征准备 ─────────────────────────────────────────
+            # DINOv2 已做 L2 归一化，直接用余弦距离聚类效果最好
+            # 高维拼接（1024+52）会放大欧氏距离（同模板距离从0.03→0.17+），破坏聚类
+            # 颜色特征保留，仅在阶段5跨簇合并时作为辅助判断
+            dino_norm = dino_arr  # 已L2归一化，cosine metric
             color_norm = color_arr / (np.linalg.norm(color_arr, axis=1, keepdims=True) + 1e-8)
+            combined = dino_norm  # HDBSCAN 输入：DINOv2 (N, 1024)，用 cosine 距离
             cw = settings.TEMPLATE_COLOR_WEIGHT
-            # 加权拼接：dino 占 (1-cw) 权重，颜色占 cw 权重（通过缩放体现）
-            combined = np.concatenate([
-                (1.0 - cw) * dino_norm,   # (N, 1024)
-                cw * color_norm,           # (N, 52)
-            ], axis=1)  # → (N, 1076)
             logger.info(
-                "Feature fusion: dino(1024) + LAB_color(52) → combined(%d), color_weight=%.2f",
-                combined.shape[1], cw,
+                "Feature: DINOv2(1024D, cosine), color_weight=%.2f (aux only)", cw,
             )
             # ── 阶段 3：全局 HDBSCAN（eom 方法）────────────────────────────
             # eom（Excess of Mass）比 leaf 更稳健：优先选择层级树中持久性强的大簇，
@@ -401,7 +396,7 @@ class ClusterService:
             all_labels = hdbscan.HDBSCAN(
                 min_cluster_size=settings.DBSCAN_MIN_SAMPLES,
                 min_samples=1,
-                metric="euclidean",
+                metric="cosine",
                 cluster_selection_epsilon=settings.TEMPLATE_HDBSCAN_EPSILON,
                 cluster_selection_method="eom",
             ).fit_predict(combined)
@@ -483,7 +478,8 @@ class ClusterService:
             noise_idx = np.where(all_labels == -1)[0]
 
             if len(noise_idx) > 0 and cluster_labels_now:
-                # 用 combined 特征计算质心（和 HDBSCAN 输入一致）
+                # combined = L2归一化DINOv2，欧氏距离 ≈ sqrt(2*cosine_dist)
+                # cosine_dist=0.08 → euclidean≈0.40，MERGE_THRESHOLD=0.37 ≈ cosine_dist=0.068
                 centroids_final = {
                     lbl: combined[np.where(all_labels == lbl)[0]].mean(axis=0)
                     for lbl in cluster_labels_now
