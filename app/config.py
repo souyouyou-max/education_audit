@@ -52,7 +52,7 @@ class Settings:
 
     # 模板聚类专用参数（全局 HDBSCAN + DINOv2/LAB 特征融合，替代原 KMeans 预分组方案）
     TEMPLATE_DBSCAN_EPS: float = float(os.getenv("TEMPLATE_DBSCAN_EPS", "0.09"))  # 保留兼容，不再使用
-    TEMPLATE_HDBSCAN_EPSILON: float = float(os.getenv("TEMPLATE_HDBSCAN_EPSILON", "0.05"))  # HDBSCAN cluster_selection_epsilon（融合特征空间）
+    TEMPLATE_HDBSCAN_EPSILON: float = float(os.getenv("TEMPLATE_HDBSCAN_EPSILON", "0.20"))  # HDBSCAN cluster_selection_epsilon（1076D融合特征欧氏距离，同模板内距离~0.28-0.36，0.20 让HDBSCAN主动合并近邻点减少噪点）
     TEMPLATE_KMEANS_N: int = int(os.getenv("TEMPLATE_KMEANS_N", "5"))  # 保留兼容，不再使用
     TEMPLATE_MERGE_THRESHOLD: float = float(os.getenv("TEMPLATE_MERGE_THRESHOLD", "0.37"))  # DINOv2 质心欧氏距离跨簇合并阈值（同模板≈0.28~0.36，跨模板≈0.48+）
     TEMPLATE_COLOR_WEIGHT: float = float(os.getenv("TEMPLATE_COLOR_WEIGHT", "0.3"))   # LAB 颜色特征融合权重（0=纯DINOv2，1=纯颜色；0.3 在颜色相近模板中有效区分细微结构差异）
