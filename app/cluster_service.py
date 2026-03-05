@@ -524,9 +524,16 @@ class ClusterService:
                 centroid_vecs = np.array([centroids_final[l] for l in centroid_labels_list])
                 for ni in noise_idx:
                     dists = np.linalg.norm(centroid_vecs - combined[ni], axis=1)
-                    best_j = int(np.argmin(dists))
-                    if dists[best_j] < settings.TEMPLATE_MERGE_THRESHOLD:
-                        all_labels[ni] = centroid_labels_list[best_j]
+                    sorted_j = np.argsort(dists)
+                    best_j = int(sorted_j[0])
+                    if dists[best_j] >= settings.TEMPLATE_MERGE_THRESHOLD:
+                        continue  # 太远，不归入
+                    # 如果有第二近的簇，要求距离差足够大（避免边界点被错误拉走）
+                    if len(sorted_j) >= 2:
+                        margin = dists[int(sorted_j[1])] - dists[best_j]
+                        if margin < 0.05:
+                            continue  # 边界模糊，保留为噪声
+                    all_labels[ni] = centroid_labels_list[best_j]
 
             # 6b. 噪声互配对：剩余噪声点两两比较 combined 距离，生成新簇
             # 阈值用 NOISE_PAIR_THRESHOLD（比 MERGE_THRESHOLD 更宽松，专门给孤立点用）
@@ -563,32 +570,8 @@ class ClusterService:
                         logger.debug("Noise pairing: new cluster %d, members=%d", next_lbl, len(members))
                         next_lbl += 1
 
-            # 6c. 软回收：对仍为噪声的点，放宽阈值（MERGE_THRESHOLD * 1.5）就近并入
-            # 目的：尽量减少孤立噪点，将边缘样本归入最近的合理簇
-            noise_idx = np.where(all_labels == -1)[0]
-            if len(noise_idx) > 0 and cluster_labels_now:
-                soft_threshold = settings.TEMPLATE_MERGE_THRESHOLD * 1.5
-                # 重新计算质心（已有新簇加入）
-                updated_labels = sorted(set(all_labels) - {-1})
-                if updated_labels:
-                    centroids_soft = {
-                        lbl: combined[np.where(all_labels == lbl)[0]].mean(axis=0)
-                        for lbl in updated_labels
-                    }
-                    soft_label_list = list(centroids_soft.keys())
-                    soft_centroid_vecs = np.array([centroids_soft[l] for l in soft_label_list])
-                    for ni in noise_idx:
-                        dists = np.linalg.norm(soft_centroid_vecs - combined[ni], axis=1)
-                        best_j = int(np.argmin(dists))
-                        if dists[best_j] < soft_threshold:
-                            all_labels[ni] = soft_label_list[best_j]
-                            logger.debug(
-                                "Soft recovery: noise idx=%d → cluster %d (dist=%.4f)",
-                                ni, soft_label_list[best_j], dists[best_j]
-                            )
-
             final_noise = int(np.sum(all_labels == -1))
-            logger.info("Noise recovery done: %d remaining noise points (was %d)", final_noise, len(noise_idx) if len(noise_idx) > 0 else 0)
+            logger.info("Noise recovery done: %d remaining noise points", final_noise)
 
             # ── 整理输出 ─────────────────────────────────────────────────
             groups: Dict = {}
