@@ -1,4 +1,5 @@
 """OCR 与 PS 检测相关路由"""
+import asyncio
 import logging
 from pathlib import Path
 
@@ -79,12 +80,16 @@ async def run_ocr_single(entity_id: int):
     img_path = get_image_path_by_id(entity_id)
     if not img_path:
         raise HTTPException(status_code=404, detail=f"Image not found for id {entity_id}")
-    try:
-        image = Image.open(img_path).convert("RGB")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to open image: {e}")
 
-    fields = ocr_service.extract_and_cache(entity_id, image)
+    def _run():
+        image = Image.open(img_path).convert("RGB")
+        return ocr_service.extract_and_cache(entity_id, image)
+
+    try:
+        fields = await asyncio.to_thread(_run)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"OCR failed: {e}")
+
     return {
         "id": str(entity_id),
         "ocr_done": bool(fields) and "_ocr_error" not in fields,
@@ -99,14 +104,17 @@ async def rerun_ocr_single(entity_id: int):
     img_path = get_image_path_by_id(entity_id)
     if not img_path:
         raise HTTPException(status_code=404, detail=f"Image not found for id {entity_id}")
-    ocr_service.clear_cache(entity_id)
+
+    def _run():
+        ocr_service.clear_cache(entity_id)
+        image = Image.open(img_path).convert("RGB")
+        return ocr_service.extract_and_cache(entity_id, image)
 
     try:
-        image = Image.open(img_path).convert("RGB")
+        fields = await asyncio.to_thread(_run)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to open image: {e}")
+        raise HTTPException(status_code=500, detail=f"OCR rerun failed: {e}")
 
-    fields = ocr_service.extract_and_cache(entity_id, image)
     return {
         "id": str(entity_id),
         "ocr_done": bool(fields) and "_ocr_error" not in fields,
@@ -131,12 +139,16 @@ async def ps_detect_single(entity_id: int):
     img_path = get_image_path_by_id(entity_id)
     if not img_path:
         raise HTTPException(status_code=404, detail=f"Image not found for id {entity_id}")
-    try:
-        image = Image.open(img_path).convert("RGB")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to open image: {e}")
 
-    result = ps_detection_service.detect_and_save(entity_id, image)
+    def _run():
+        image = Image.open(img_path).convert("RGB")
+        return ps_detection_service.detect_and_save(entity_id, image)
+
+    try:
+        result = await asyncio.to_thread(_run)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PS detection failed: {e}")
+
     return {"id": str(entity_id), **result}
 
 
@@ -146,10 +158,14 @@ async def ps_redetect_single(entity_id: int):
     img_path = get_image_path_by_id(entity_id)
     if not img_path:
         raise HTTPException(status_code=404, detail=f"Image not found for id {entity_id}")
-    try:
-        image = Image.open(img_path).convert("RGB")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to open image: {e}")
 
-    result = ps_detection_service.redetect_and_save(entity_id, image)
+    def _run():
+        image = Image.open(img_path).convert("RGB")
+        return ps_detection_service.redetect_and_save(entity_id, image)
+
+    try:
+        result = await asyncio.to_thread(_run)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PS redetection failed: {e}")
+
     return {"id": str(entity_id), **result}

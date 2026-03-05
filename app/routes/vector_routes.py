@@ -1,4 +1,5 @@
 """向量相关路由：上传、搜索、聚类"""
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -271,11 +272,11 @@ async def cluster_analysis(vector_field: str = "image_vector"):
     logger.info("Starting clustering with vector_field: %s", vector_field)
 
     if vector_field == "image_vector":
-        result = cluster_service.cluster_by_image_vector()
+        result = await asyncio.to_thread(cluster_service.cluster_by_image_vector)
     elif vector_field == "face_vector":
-        result = cluster_service.cluster_by_face_vector()
+        result = await asyncio.to_thread(cluster_service.cluster_by_face_vector)
     else:
-        result = cluster_service.cluster_by_template_vector()
+        result = await asyncio.to_thread(cluster_service.cluster_by_template_vector)
 
     return ClusterResponse(**result)
 
@@ -418,6 +419,32 @@ async def upload_from_directory(
             detail=f"目录下没有支持的图片文件（{', '.join(settings.ALLOWED_EXTENSIONS)}）",
         )
 
+    def _process_one_sync(filepath: str, filename: str) -> BatchUploadItem:
+        with open(filepath, "rb") as f:
+            file_content = f.read()
+        if not validate_image_file(file_content, filename):
+            return BatchUploadItem(
+                filename=filename, success=False,
+                error="Invalid image file or exceeds size limit",
+            )
+        image = load_image_from_bytes(file_content)
+        logger.info("Extracting vectors from image: %s", filename)
+        image_vector, face_vector, template_vector = vector_service.extract_all_vectors(image)
+        has_face = face_vector is not None and not all(v == 0.0 for v in face_vector)
+        inserted_id = milvus_client.insert(
+            image_vector=image_vector,
+            face_vector=face_vector,
+            template_vector=template_vector,
+        )
+        try:
+            save_image_by_id(file_content, inserted_id, filename)
+            save_certificate(inserted_id, filename, has_face)
+        except Exception:
+            milvus_client.delete_by_id(inserted_id)
+            raise
+        logger.info("Image uploaded successfully: %s -> id=%s", filename, inserted_id)
+        return BatchUploadItem(filename=filename, id=str(inserted_id), has_face=has_face, success=True)
+
     items: List[BatchUploadItem] = []
     success_count = 0
     fail_count = 0
@@ -425,39 +452,12 @@ async def upload_from_directory(
     for filename in image_files:
         filepath = os.path.join(directory, filename)
         try:
-            with open(filepath, "rb") as f:
-                file_content = f.read()
-
-            if not validate_image_file(file_content, filename):
-                items.append(BatchUploadItem(
-                    filename=filename, success=False,
-                    error="Invalid image file or exceeds size limit",
-                ))
+            item = await asyncio.to_thread(_process_one_sync, filepath, filename)
+            items.append(item)
+            if item.success:
+                success_count += 1
+            else:
                 fail_count += 1
-                continue
-
-            image = load_image_from_bytes(file_content)
-            logger.info("Extracting vectors from image: %s", filename)
-            image_vector, face_vector, template_vector = vector_service.extract_all_vectors(image)
-            has_face = face_vector is not None and not all(v == 0.0 for v in face_vector)
-
-            inserted_id = milvus_client.insert(
-                image_vector=image_vector,
-                face_vector=face_vector,
-                template_vector=template_vector,
-            )
-            try:
-                save_image_by_id(file_content, inserted_id, filename)
-                save_certificate(inserted_id, filename, has_face)
-            except Exception:
-                milvus_client.delete_by_id(inserted_id)  # 文件写入失败时回滚，避免孤儿记录
-                raise
-            logger.info("Image uploaded successfully: %s -> id=%s", filename, inserted_id)
-            items.append(BatchUploadItem(
-                filename=filename, id=str(inserted_id), has_face=has_face, success=True,
-            ))
-            success_count += 1
-
         except Exception as e:
             logger.error("Error processing %s: %s", filename, e)
             items.append(BatchUploadItem(filename=filename, success=False, error=str(e)))

@@ -52,18 +52,51 @@ async def analyze_certificate(entity_id: int):
     if not img_path:
         raise HTTPException(status_code=404, detail=f"Image not found for id {entity_id}")
 
-    try:
-        image = Image.open(img_path).convert("RGB")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to open image: {e}")
-
     id_to_name = get_id_to_filename() or scan_upload_ids()
     filename = id_to_name.get(str(entity_id))
 
-    # 1. 人脸属性
-    face_info_raw = vector_service.get_face_attributes(image)
+    def _do_analyze():
+        try:
+            image = Image.open(img_path).convert("RGB")
+        except Exception as e:
+            raise ValueError(f"Failed to open image: {e}")
+
+        # 1. 人脸属性
+        face_info_raw = vector_service.get_face_attributes(image)
+        face_bbox = None
+        if face_info_raw:
+            bbox_raw = face_info_raw.get("bbox")
+            if bbox_raw and len(bbox_raw) == 4:
+                face_bbox = tuple(bbox_raw)
+
+        # 2. OCR（带缓存）
+        try:
+            raw_fields = ocr_service.extract_and_cache(entity_id, image)
+        except Exception as e:
+            logger.warning("OCR failed for id=%s: %s", entity_id, e)
+            raw_fields = {}
+
+        # 3. 图像取证
+        try:
+            forensic_result = forensic_service.full_analysis(image, face_bbox)
+        except Exception as e:
+            logger.warning("Forensic analysis failed for id=%s: %s", entity_id, e)
+            forensic_result = {"error": str(e)}
+
+        # 4. 单张规则校验
+        rule_issues_raw = rule_engine.check_single(raw_fields, face_info_raw)
+
+        save_forensic_result(entity_id, forensic_result)
+        save_single_analyze_issues(entity_id, rule_issues_raw)
+
+        return face_info_raw, raw_fields, forensic_result, rule_issues_raw
+
+    try:
+        face_info_raw, raw_fields, forensic_result, rule_issues_raw = await asyncio.to_thread(_do_analyze)
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
     face_info = None
-    face_bbox = None
     if face_info_raw:
         face_info = FaceInfo(
             age=face_info_raw.get("age"),
@@ -71,51 +104,24 @@ async def analyze_certificate(entity_id: int):
             det_score=face_info_raw.get("det_score"),
             bbox=face_info_raw.get("bbox"),
         )
-        bbox_raw = face_info_raw.get("bbox")
-        if bbox_raw and len(bbox_raw) == 4:
-            face_bbox = tuple(bbox_raw)
-
-    # 2. OCR（带缓存）
-    try:
-        raw_fields = ocr_service.extract_and_cache(entity_id, image)
-        ocr_fields = OcrFields(
-            school=raw_fields.get("school"),
-            principal=raw_fields.get("principal"),
-            grad_year=raw_fields.get("grad_year"),
-            enrollment_year=raw_fields.get("enrollment_year"),
-            issue_year=raw_fields.get("issue_year"),
-            cert_no=raw_fields.get("cert_no"),
-            gender=raw_fields.get("gender"),
-            birth_year=raw_fields.get("birth_year"),
-        )
-    except Exception as e:
-        logger.warning("OCR failed for id=%s: %s", entity_id, e)
-        raw_fields = {}
-        ocr_fields = None
-
-    # 3. 图像取证
-    try:
-        forensic_result = forensic_service.full_analysis(image, face_bbox)
-    except Exception as e:
-        logger.warning("Forensic analysis failed for id=%s: %s", entity_id, e)
-        forensic_result = {"error": str(e)}
-
-    # 4. 单张规则校验
-    rule_issues_raw = rule_engine.check_single(raw_fields, face_info_raw)
+    ocr_fields = OcrFields(
+        school=raw_fields.get("school"),
+        principal=raw_fields.get("principal"),
+        grad_year=raw_fields.get("grad_year"),
+        enrollment_year=raw_fields.get("enrollment_year"),
+        issue_year=raw_fields.get("issue_year"),
+        cert_no=raw_fields.get("cert_no"),
+        gender=raw_fields.get("gender"),
+        birth_year=raw_fields.get("birth_year"),
+    ) if raw_fields else None
     rule_issues = [FraudIssue(**i) for i in rule_issues_raw]
 
-    # 5. 汇总风险
     forensic_flags = forensic_result.get("risk_flags", [])
     all_flags = forensic_flags + [i.rule for i in rule_issues]
     risk_level = (
         "高" if any(i.severity == "高" for i in rule_issues) or len(forensic_flags) >= 2
         else ("中" if rule_issues or forensic_flags else "低")
     )
-
-    # save_ocr_result 不再重复调用：extract_and_cache() 内部已写入完整字段
-    # 再调用一次 save_ocr_result 会用字段不完整的旧版本覆盖完整数据
-    save_forensic_result(entity_id, forensic_result)
-    save_single_analyze_issues(entity_id, [i.model_dump() for i in rule_issues])
 
     return AnalyzeResponse(
         entity_id=str(entity_id),  # 转字符串，防止 JS 大整数精度丢失
