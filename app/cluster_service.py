@@ -490,18 +490,13 @@ class ClusterService:
                 }
                 centroid_labels_list = list(centroids_final.keys())
                 centroid_vecs = np.array([centroids_final[l] for l in centroid_labels_list])
+                # 放宽阈值：分组已准确，用 MERGE_THRESHOLD * 1.2 回收边缘噪点
+                soft_limit = settings.TEMPLATE_MERGE_THRESHOLD * 1.2
                 for ni in noise_idx:
                     dists = np.linalg.norm(centroid_vecs - combined[ni], axis=1)
-                    sorted_j = np.argsort(dists)
-                    best_j = int(sorted_j[0])
-                    if dists[best_j] >= settings.TEMPLATE_MERGE_THRESHOLD:
-                        continue  # 太远，不归入
-                    # 如果有第二近的簇，要求距离差足够大（避免边界点被错误拉走）
-                    if len(sorted_j) >= 2:
-                        margin = dists[int(sorted_j[1])] - dists[best_j]
-                        if margin < 0.05:
-                            continue  # 边界模糊，保留为噪声
-                    all_labels[ni] = centroid_labels_list[best_j]
+                    best_j = int(np.argmin(dists))
+                    if dists[best_j] < soft_limit:
+                        all_labels[ni] = centroid_labels_list[best_j]
 
             # 6b. 噪声互配对：剩余噪声点两两比较 combined 距离，生成新簇
             # 阈值用 NOISE_PAIR_THRESHOLD（比 MERGE_THRESHOLD 更宽松，专门给孤立点用）
@@ -531,6 +526,19 @@ class ClusterService:
 
                 cur_max2 = int(all_labels.max()) if (all_labels >= 0).any() else -1
                 next_lbl = cur_max2 + 1
+                # 统计噪点间最小距离，帮助诊断阈值是否合适
+                if len(noise_idx) >= 2:
+                    noise_vecs = combined[noise_idx]
+                    pair_dists = []
+                    for ii in range(len(noise_idx)):
+                        for jj in range(ii+1, len(noise_idx)):
+                            pair_dists.append(np.linalg.norm(noise_vecs[ii] - noise_vecs[jj]))
+                    pair_dists.sort()
+                    logger.info(
+                        "Noise pair distances (top10 smallest): %s",
+                        [round(d, 4) for d in pair_dists[:10]]
+                    )
+
                 for root, members in root_members.items():
                     if len(members) >= settings.DBSCAN_MIN_SAMPLES:
                         for mi in members:
