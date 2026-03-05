@@ -20,23 +20,42 @@ _SessionLocal = None
 
 
 def init_db() -> None:
-    """初始化数据库连接，自动建表"""
+    """初始化数据库连接，自动建库建表"""
     global _engine, _SessionLocal
 
     url = settings.MYSQL_URL
     logger.info("Connecting to MySQL: %s", url.replace(settings.MYSQL_PASSWORD, "***"))
 
-    _engine = create_engine(
-        url,
-        pool_pre_ping=True,       # 每次获取连接前ping一下，避免连接超时断开
-        pool_recycle=3600,         # 连接1小时后回收，防止MySQL 8h超时断开
-        pool_size=5,
-        max_overflow=10,
-        echo=False,
-    )
+    # 先尝试直接连接；若报 Unknown database 则自动建库后重试
+    try:
+        _engine = create_engine(url, pool_pre_ping=True, pool_recycle=3600,
+                                pool_size=5, max_overflow=10, echo=False)
+        Base.metadata.create_all(bind=_engine)
+    except Exception as e:
+        if "Unknown database" in str(e):
+            logger.warning("Database not found, creating it: %s", settings.MYSQL_DATABASE)
+            # 连到 MySQL root（不指定库名）
+            root_url = (
+                f"mysql+pymysql://{settings.MYSQL_USER}:{settings.MYSQL_PASSWORD}"
+                f"@{settings.MYSQL_HOST}:{settings.MYSQL_PORT}/?charset=utf8mb4"
+            )
+            tmp_engine = create_engine(root_url, echo=False)
+            with tmp_engine.connect() as conn:
+                conn.execute(text(
+                    f"CREATE DATABASE IF NOT EXISTS `{settings.MYSQL_DATABASE}` "
+                    f"CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+                ))
+                conn.commit()
+            tmp_engine.dispose()
+            logger.info("Database '%s' created", settings.MYSQL_DATABASE)
+            # 重新连到目标库
+            _engine = create_engine(url, pool_pre_ping=True, pool_recycle=3600,
+                                    pool_size=5, max_overflow=10, echo=False)
+            Base.metadata.create_all(bind=_engine)
+        else:
+            raise
 
     # 自动建表（表已存在则跳过）
-    Base.metadata.create_all(bind=_engine)
     logger.info("MySQL tables initialized")
 
     # 向后兼容：为已存在的 ocr_results 表新增列（create_all 不会更新已有表结构）

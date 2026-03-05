@@ -393,13 +393,16 @@ class ClusterService:
             # ── 阶段 3：全局 HDBSCAN（eom 方法）────────────────────────────
             # eom（Excess of Mass）比 leaf 更稳健：优先选择层级树中持久性强的大簇，
             # 减少因密度微小波动导致大簇被错误拆分。
+            # HDBSCAN BallTree 不支持 cosine metric，预计算距离矩阵传入
+            from sklearn.metrics.pairwise import cosine_distances
+            dist_matrix = cosine_distances(combined)
             all_labels = hdbscan.HDBSCAN(
                 min_cluster_size=settings.DBSCAN_MIN_SAMPLES,
                 min_samples=1,
-                metric="cosine",
+                metric="precomputed",
                 cluster_selection_epsilon=settings.TEMPLATE_HDBSCAN_EPSILON,
                 cluster_selection_method="eom",
-            ).fit_predict(combined)
+            ).fit_predict(dist_matrix)
             logger.info(
                 "Template clustering HDBSCAN: n=%d, clusters=%d, noise=%d",
                 n, len(set(all_labels) - {-1}), int(np.sum(all_labels == -1)),
