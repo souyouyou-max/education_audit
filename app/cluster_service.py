@@ -549,6 +549,35 @@ class ClusterService:
             final_noise = int(np.sum(all_labels == -1))
             logger.info("Noise recovery done: %d remaining noise points", final_noise)
 
+            # ── 噪点诊断：计算噪点之间的距离分布 ────────────────────────
+            final_noise_idx = np.where(all_labels == -1)[0]
+            noise_distance_info: Dict[str, Any] = {}
+            if len(final_noise_idx) >= 2:
+                noise_vecs = combined[final_noise_idx]
+                pair_dists = []
+                for ii in range(len(final_noise_idx)):
+                    for jj in range(ii + 1, len(final_noise_idx)):
+                        pair_dists.append(float(np.linalg.norm(noise_vecs[ii] - noise_vecs[jj])))
+                pair_dists.sort()
+                noise_distance_info = {
+                    "count": len(final_noise_idx),
+                    "min_dist": round(pair_dists[0], 4),
+                    "p25_dist": round(pair_dists[len(pair_dists) // 4], 4),
+                    "median_dist": round(pair_dists[len(pair_dists) // 2], 4),
+                    "top10_smallest": [round(d, 4) for d in pair_dists[:10]],
+                    "hint": (
+                        f"最近的噪点对距离={pair_dists[0]:.4f}，"
+                        f"当前配对阈值={settings.TEMPLATE_NOISE_PAIR_THRESHOLD}。"
+                        + ("可适当调大 TEMPLATE_NOISE_PAIR_THRESHOLD" if pair_dists[0] > settings.TEMPLATE_NOISE_PAIR_THRESHOLD else "阈值已覆盖最近对，噪点可能确实孤立")
+                    ),
+                }
+                logger.info(
+                    "Noise diagnostics: count=%d, min_dist=%.4f, p25=%.4f, median=%.4f, pair_threshold=%.4f",
+                    len(final_noise_idx), pair_dists[0],
+                    pair_dists[len(pair_dists)//4], pair_dists[len(pair_dists)//2],
+                    settings.TEMPLATE_NOISE_PAIR_THRESHOLD,
+                )
+
             # ── 整理输出 ─────────────────────────────────────────────────
             groups: Dict = {}
             for idx, label in enumerate(all_labels):
@@ -584,6 +613,7 @@ class ClusterService:
                     "noise_pair_threshold": settings.TEMPLATE_NOISE_PAIR_THRESHOLD,
                     "layout_split_threshold": LAYOUT_SPLIT_THRESHOLD,
                 },
+                "noise_diagnostics": noise_distance_info,
                 "id_to_filename": get_filenames_for_ids(valid_ids),
             }
         except Exception as e:
